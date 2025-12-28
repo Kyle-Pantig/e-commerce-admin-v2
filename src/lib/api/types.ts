@@ -1,0 +1,559 @@
+/**
+ * Shared API Types
+ * 
+ * Centralized type definitions for all API responses.
+ * Import from '@/lib/api/types'
+ */
+
+// =============================================================================
+// Pagination
+// =============================================================================
+
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  per_page: number
+  total_pages: number
+}
+
+export interface PaginationParams {
+  page?: number
+  per_page?: number
+}
+
+// =============================================================================
+// Bulk Operations
+// =============================================================================
+
+export interface BulkOperationResponse {
+  message: string
+  affected_count: number
+}
+
+// =============================================================================
+// Category Types
+// =============================================================================
+
+export interface Category {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  image: string | null
+  parent_id: string | null
+  display_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  children?: Category[] | null
+}
+
+export interface CategoryCreate {
+  name: string
+  description?: string | null
+  image?: string | null
+  parent_id?: string | null
+  display_order?: number
+  is_active?: boolean
+}
+
+export interface CategoryUpdate {
+  name?: string
+  description?: string | null
+  image?: string | null
+  parent_id?: string | null
+  display_order?: number
+  is_active?: boolean
+}
+
+// =============================================================================
+// Attribute Types
+// =============================================================================
+
+export type AttributeType = "TEXT" | "NUMBER" | "SELECT" | "BOOLEAN"
+
+export interface Attribute {
+  id: string
+  name: string
+  type: AttributeType
+  description: string | null
+  is_required: boolean
+  is_filterable: boolean
+  display_order: number
+  is_active: boolean
+  validation_rules: Record<string, unknown> | null
+  options: string[] | null
+  min_length: number | null
+  max_length: number | null
+  placeholder: string | null
+  default_value: string | null
+  min_value: number | null
+  max_value: number | null
+  step: number | null
+  unit: string | null
+  true_label: string | null
+  false_label: string | null
+  category_ids: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface AttributeCreate {
+  name: string
+  type: AttributeType
+  description?: string | null
+  is_required?: boolean
+  is_filterable?: boolean
+  display_order?: number
+  is_active?: boolean
+  validation_rules?: Record<string, unknown> | null
+  options?: string[] | null
+  min_length?: number | null
+  max_length?: number | null
+  placeholder?: string | null
+  default_value?: string | null
+  min_value?: number | null
+  max_value?: number | null
+  step?: number | null
+  unit?: string | null
+  true_label?: string | null
+  false_label?: string | null
+  category_ids?: string[] | null
+}
+
+export interface AttributeUpdate extends Partial<AttributeCreate> {}
+
+export interface AttributeReorderItem {
+  id: string
+  display_order: number
+}
+
+// =============================================================================
+// Product Types
+// =============================================================================
+
+export type ProductStatus = "DRAFT" | "ACTIVE" | "DISABLED" | "ARCHIVED"
+
+export interface ProductImage {
+  id: string
+  product_id: string
+  url: string
+  alt_text: string | null
+  display_order: number
+  is_primary: boolean
+  created_at: string
+}
+
+export interface ProductVariant {
+  id: string
+  product_id: string
+  sku: string | null
+  name: string
+  price: number | null
+  sale_price: number | null
+  stock: number
+  low_stock_threshold: number | null
+  is_active: boolean
+  options: Record<string, string> | null
+  image_url: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProductAttributeValue {
+  id: string
+  product_id: string
+  attribute_id: string
+  value: string
+  created_at: string
+  updated_at: string
+  attribute_name?: string | null
+  attribute_type?: string | null
+}
+
+export interface Product {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  short_description: string | null
+  sku: string | null
+  status: ProductStatus
+  base_price: number
+  sale_price: number | null
+  cost_price: number | null
+  category_id: string
+  category_name: string | null
+  stock: number
+  low_stock_threshold: number | null
+  track_inventory: boolean
+  weight: number | null
+  length: number | null
+  width: number | null
+  height: number | null
+  meta_title: string | null
+  meta_description: string | null
+  is_featured: boolean
+  has_variants: boolean
+  images: ProductImage[] | null
+  variants: ProductVariant[] | null
+  attribute_values: ProductAttributeValue[] | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProductListItem {
+  id: string
+  name: string
+  slug: string
+  sku: string | null
+  status: ProductStatus
+  base_price: number
+  sale_price: number | null
+  stock: number
+  category_id: string
+  category_name: string | null
+  is_featured: boolean
+  has_variants: boolean
+  primary_image: string | null
+  variants: { id: string; stock: number; is_active: boolean }[] | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProductImageCreate {
+  url: string
+  alt_text?: string | null
+  display_order?: number
+  is_primary?: boolean
+}
+
+export interface ProductVariantCreate {
+  sku?: string | null
+  name: string
+  price?: number | null
+  sale_price?: number | null
+  stock?: number
+  low_stock_threshold?: number | null
+  is_active?: boolean
+  options?: Record<string, unknown> | null
+  image_url?: string | null
+}
+
+export interface ProductAttributeValueCreate {
+  attribute_id: string
+  value: string
+}
+
+export interface ProductCreate {
+  name: string
+  description?: string | null
+  short_description?: string | null
+  sku?: string | null
+  status?: ProductStatus
+  base_price: number
+  sale_price?: number | null
+  cost_price?: number | null
+  category_id: string
+  stock?: number
+  low_stock_threshold?: number | null
+  track_inventory?: boolean
+  weight?: number | null
+  length?: number | null
+  width?: number | null
+  height?: number | null
+  meta_title?: string | null
+  meta_description?: string | null
+  is_featured?: boolean
+  has_variants?: boolean
+  images?: ProductImageCreate[]
+  variants?: ProductVariantCreate[]
+  attribute_values?: ProductAttributeValueCreate[]
+}
+
+export interface ProductUpdate extends Partial<ProductCreate> {}
+
+export interface ProductListParams extends PaginationParams {
+  category_id?: string
+  status?: ProductStatus
+  is_featured?: boolean
+  min_price?: number
+  max_price?: number
+  in_stock?: boolean
+  search?: string
+  sort_by?: string
+  sort_order?: "asc" | "desc"
+  include_inactive?: boolean
+}
+
+// =============================================================================
+// User Types
+// =============================================================================
+
+export type UserRole = "USER" | "ADMIN"
+
+export interface User {
+  id: string
+  email: string
+  full_name: string | null
+  role: UserRole
+  is_approved: boolean
+  created_at: string | null
+}
+
+export interface UserUpdate {
+  is_approved?: boolean
+  role?: UserRole
+}
+
+// =============================================================================
+// Auth Types
+// =============================================================================
+
+export interface AuthUser {
+  id: string
+  email: string
+  full_name: string | null
+  role: UserRole | null
+  is_approved: boolean | null
+  user_metadata?: Record<string, unknown>
+  created_at: string | null
+}
+
+export interface AuthResponse {
+  access_token: string
+  refresh_token: string
+  expires_in: number
+  user: {
+    id: string
+    email: string
+    user_metadata?: Record<string, unknown>
+  }
+}
+
+// =============================================================================
+// Order Types
+// =============================================================================
+
+export type OrderStatus = 
+  | "PENDING"
+  | "CONFIRMED"
+  | "PROCESSING"
+  | "SHIPPED"
+  | "DELIVERED"
+  | "CANCELLED"
+  | "REFUNDED"
+  | "ON_HOLD"
+
+export type PaymentStatus = 
+  | "PENDING"
+  | "PAID"
+  | "FAILED"
+  | "REFUNDED"
+  | "PARTIALLY_REFUNDED"
+
+export type PaymentMethod = 
+  | "CASH_ON_DELIVERY"
+  | "CREDIT_CARD"
+  | "DEBIT_CARD"
+  | "BANK_TRANSFER"
+  | "DIGITAL_WALLET"
+  | "OTHER"
+
+export interface OrderItem {
+  id: string
+  order_id: string
+  product_id: string | null
+  product_name: string
+  product_sku: string | null
+  product_image: string | null
+  variant_id: string | null
+  variant_name: string | null
+  variant_options: Record<string, string> | null
+  unit_price: number
+  quantity: number
+  subtotal: number
+  created_at: string
+}
+
+export interface OrderStatusHistory {
+  id: string
+  order_id: string
+  from_status: OrderStatus | null
+  to_status: OrderStatus
+  note: string | null
+  changed_by: string | null
+  created_at: string
+}
+
+export interface Order {
+  id: string
+  order_number: string
+  status: OrderStatus
+  payment_status: PaymentStatus
+  payment_method: PaymentMethod | null
+  
+  // Customer info
+  customer_name: string
+  customer_email: string
+  customer_phone: string | null
+  
+  // Shipping address
+  shipping_address: string
+  shipping_city: string
+  shipping_state: string | null
+  shipping_zip: string | null
+  shipping_country: string
+  
+  // Billing address
+  billing_address: string | null
+  billing_city: string | null
+  billing_state: string | null
+  billing_zip: string | null
+  billing_country: string | null
+  
+  // Totals
+  subtotal: number
+  shipping_cost: number
+  tax_amount: number
+  discount_amount: number
+  total: number
+  
+  // Notes
+  notes: string | null
+  internal_notes: string | null
+  tracking_number: string | null
+  shipping_carrier: string | null
+  
+  // Timestamps
+  created_at: string
+  updated_at: string
+  shipped_at: string | null
+  delivered_at: string | null
+  cancelled_at: string | null
+  
+  // Relations
+  items: OrderItem[]
+  status_history: OrderStatusHistory[]
+}
+
+export interface OrderListItem {
+  id: string
+  order_number: string
+  status: OrderStatus
+  payment_status: PaymentStatus
+  payment_method: PaymentMethod | null
+  customer_name: string
+  customer_email: string
+  total: number
+  items_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface OrderItemCreate {
+  product_id?: string | null
+  product_name: string
+  product_sku?: string | null
+  product_image?: string | null
+  variant_id?: string | null
+  variant_name?: string | null
+  variant_options?: Record<string, string> | null
+  unit_price: number
+  quantity: number
+}
+
+export interface OrderCreate {
+  customer_name: string
+  customer_email: string
+  customer_phone?: string | null
+  
+  shipping_address: string
+  shipping_city: string
+  shipping_state?: string | null
+  shipping_zip?: string | null
+  shipping_country?: string
+  
+  billing_address?: string | null
+  billing_city?: string | null
+  billing_state?: string | null
+  billing_zip?: string | null
+  billing_country?: string | null
+  
+  payment_method?: PaymentMethod
+  
+  shipping_cost?: number
+  tax_amount?: number
+  discount_amount?: number
+  
+  notes?: string | null
+  internal_notes?: string | null
+  
+  items: OrderItemCreate[]
+}
+
+export interface OrderUpdate {
+  customer_name?: string
+  customer_email?: string
+  customer_phone?: string | null
+  
+  shipping_address?: string
+  shipping_city?: string
+  shipping_state?: string | null
+  shipping_zip?: string | null
+  shipping_country?: string
+  
+  billing_address?: string | null
+  billing_city?: string | null
+  billing_state?: string | null
+  billing_zip?: string | null
+  billing_country?: string | null
+  
+  payment_method?: PaymentMethod
+  payment_status?: PaymentStatus
+  
+  shipping_cost?: number
+  tax_amount?: number
+  discount_amount?: number
+  
+  notes?: string | null
+  internal_notes?: string | null
+  
+  tracking_number?: string | null
+  shipping_carrier?: string | null
+}
+
+export interface OrderStatusUpdate {
+  status: OrderStatus
+  note?: string | null
+}
+
+export interface OrderListParams extends PaginationParams {
+  status?: OrderStatus
+  payment_status?: PaymentStatus
+  search?: string
+  date_from?: string
+  date_to?: string
+  sort_by?: "created_at" | "updated_at" | "total" | "order_number"
+  sort_order?: "asc" | "desc"
+}
+
+export interface OrderStats {
+  total_orders: number
+  todays_orders: number
+  total_revenue: number
+  by_status: {
+    pending: number
+    confirmed: number
+    processing: number
+    shipped: number
+    delivered: number
+    cancelled: number
+  }
+  by_payment_status: {
+    pending: number
+    paid: number
+  }
+}
+

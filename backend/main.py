@@ -1,16 +1,32 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from auth import router as auth_router
+from routers import auth_router, categories_router, upload_router, attributes_router, products_router, orders_router
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
+from prisma_client import get_prisma_client, disconnect_prisma
 import os
+from pathlib import Path
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from root .env file (parent directory)
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Startup: Connect to Prisma
+    await get_prisma_client()
+    yield
+    # Shutdown: Disconnect from Prisma
+    await disconnect_prisma()
+
 
 app = FastAPI(
-    title="E-commerce Customer API",
-    description="Backend API for e-commerce customer application",
-    version="1.0.0"
+    title="E-commerce Admin API",
+    description="Backend API for e-commerce admin application",
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS configuration
@@ -30,11 +46,16 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth_router)
+app.include_router(categories_router)
+app.include_router(upload_router)
+app.include_router(attributes_router)
+app.include_router(products_router)
+app.include_router(orders_router)
 
 
 @app.get("/")
 async def root():
-    return {"message": "E-commerce Customer API", "version": "1.0.0"}
+    return {"message": "E-commerce Admin API", "version": "1.0.0"}
 
 
 @app.get("/health")

@@ -1,0 +1,413 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider             = "prisma-client-py"
+  recursive_type_depth = 5
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  fullName   String?  @map("full_name")
+  role       UserRole @default(USER)
+  isApproved Boolean  @default(false) @map("is_approved")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Performance indexes
+  @@index([isApproved])                    // Approval status filtering
+  @@index([role])                          // Role-based filtering
+  @@index([createdAt])                     // Sorting by creation date
+  @@index([role, isApproved])              // Combined role and approval queries
+  @@map("users")
+}
+
+enum AttributeType {
+  TEXT
+  NUMBER
+  SELECT
+  BOOLEAN
+}
+
+model Category {
+  id          String       @id @default(uuid())
+  name        String
+  slug        String       @unique
+  description String?
+  image       String?
+  parentId    String?      @map("parent_id")
+  displayOrder Int         @default(0) @map("display_order")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  // Self-referential relationship for parent-child categories
+  parent      Category?    @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Category[]   @relation("CategoryHierarchy")
+
+  // Many-to-many relationship with attributes
+  attributes  CategoryAttribute[]
+  
+  // Products in this category
+  products    Product[]
+
+  // Performance indexes
+  @@index([parentId])                    // Parent-child hierarchy queries
+  @@index([isActive])                    // Active category filtering
+  @@index([displayOrder])                // Sorting by display order
+  @@index([isActive, displayOrder])      // Common list query pattern
+  @@index([isActive, parentId])          // Active categories with parent filtering
+  @@index([name])                        // Name search/lookup
+  @@map("categories")
+}
+
+model Attribute {
+  id            String             @id @default(uuid())
+  name          String
+  type          AttributeType
+  description   String?
+  isRequired    Boolean            @default(false) @map("is_required")
+  isFilterable  Boolean            @default(false) @map("is_filterable")
+  displayOrder  Int                @default(0) @map("display_order")
+  isActive      Boolean            @default(true) @map("is_active")
+  
+  // Validation rules stored as JSON
+  validationRules Json?            @map("validation_rules")
+  
+  // For SELECT type: options stored as JSON array
+  options       Json?              // JSON array of option values
+  
+  // For TEXT type: configuration
+  minLength     Int?               @map("min_length")
+  maxLength     Int?               @map("max_length")
+  placeholder   String?
+  defaultValue  String?            @map("default_value")
+  
+  // For NUMBER type: configuration
+  minValue      Float?             @map("min_value")
+  maxValue      Float?             @map("max_value")
+  step          Float?             @default(1.0)
+  unit          String?            // e.g., "kg", "cm", "inches"
+  
+  // For BOOLEAN type: configuration
+  trueLabel     String?            @map("true_label")     @default("Yes")
+  falseLabel    String?            @map("false_label")    @default("No")
+  
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  // Many-to-many relationship with categories
+  categories    CategoryAttribute[]
+  
+  // Product attribute values using this attribute
+  productValues ProductAttributeValue[]
+
+  // Performance indexes
+  @@index([isActive])                       // Active attribute filtering
+  @@index([isFilterable])                   // Filterable attribute queries
+  @@index([displayOrder])                   // Sorting by display order
+  @@index([isActive, displayOrder])         // Common list query pattern
+  @@index([isFilterable, isActive])         // Filterable + active query
+  @@index([type])                           // Type-based filtering
+  @@index([name])                           // Name search/lookup
+  @@map("attributes")
+}
+
+model CategoryAttribute {
+  id          String     @id @default(uuid())
+  categoryId  String     @map("category_id")
+  attributeId String    @map("attribute_id")
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  category    Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  attribute   Attribute  @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, attributeId])
+  // Performance indexes for reverse lookups
+  @@index([attributeId])                   // Reverse lookup: find categories by attribute
+  @@index([categoryId])                    // Forward lookup: find attributes by category
+  @@map("category_attributes")
+}
+
+// ==========================================
+// PRODUCT MANAGEMENT
+// ==========================================
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  DISABLED
+  ARCHIVED
+}
+
+model Product {
+  id              String         @id @default(uuid())
+  name            String
+  slug            String         @unique
+  description     String?
+  shortDescription String?       @map("short_description")
+  sku             String?        @unique
+  status          ProductStatus  @default(DRAFT)
+  
+  // Pricing
+  basePrice       Float          @map("base_price")
+  salePrice       Float?         @map("sale_price")
+  costPrice       Float?         @map("cost_price")
+  
+  // Category relationship
+  categoryId      String         @map("category_id")
+  category        Category       @relation(fields: [categoryId], references: [id])
+  
+  // Inventory (for simple products without variants)
+  stock           Int            @default(0)
+  lowStockThreshold Int?         @map("low_stock_threshold")
+  trackInventory  Boolean        @default(true) @map("track_inventory")
+  
+  // Physical properties
+  weight          Float?         // in kg
+  length          Float?         // in cm
+  width           Float?         // in cm
+  height          Float?         // in cm
+  
+  // SEO
+  metaTitle       String?        @map("meta_title")
+  metaDescription String?        @map("meta_description")
+  
+  // Flags
+  isFeatured      Boolean        @default(false) @map("is_featured")
+  hasVariants     Boolean        @default(false) @map("has_variants")
+  
+  // Timestamps
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  
+  // Relations
+  images          ProductImage[]
+  variants        ProductVariant[]
+  attributeValues ProductAttributeValue[]
+  
+  @@index([categoryId])
+  @@index([status])
+  @@index([isFeatured])
+  @@index([createdAt])
+  @@index([status, isFeatured])
+  @@index([categoryId, status])
+  @@index([basePrice])                     // Price range filtering
+  @@index([stock])                         // Stock availability filtering
+  @@index([name])                          // Name search
+  @@index([status, createdAt])             // Common list with sorting
+  @@index([categoryId, status, createdAt]) // Category filtered list with sorting
+  @@map("products")
+}
+
+model ProductImage {
+  id           String   @id @default(uuid())
+  productId    String   @map("product_id")
+  url          String
+  altText      String?  @map("alt_text")
+  displayOrder Int      @default(0) @map("display_order")
+  isPrimary    Boolean  @default(false) @map("is_primary")
+  createdAt    DateTime @default(now()) @map("created_at")
+  
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  @@index([productId])
+  @@map("product_images")
+}
+
+model ProductVariant {
+  id                String   @id @default(uuid())
+  productId         String   @map("product_id")
+  sku               String?  @unique
+  name              String   // e.g., "Red - Large"
+  price             Float?   // Override price for this variant
+  salePrice         Float?   @map("sale_price")
+  stock             Int      @default(0)
+  lowStockThreshold Int?     @map("low_stock_threshold")
+  isActive          Boolean  @default(true) @map("is_active")
+  
+  // Variant options stored as JSON: {"color": "Red", "size": "Large"}
+  options           Json?    // JSON object of option key-value pairs
+  
+  // Image for this specific variant
+  imageUrl          String?  @map("image_url")
+  
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model ProductAttributeValue {
+  id          String    @id @default(uuid())
+  productId   String    @map("product_id")
+  attributeId String    @map("attribute_id")
+  value       String    // Stored as string, parsed based on attribute type
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attribute   Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  
+  @@unique([productId, attributeId])
+  @@index([productId])
+  @@index([attributeId])
+  @@map("product_attribute_values")
+}
+
+// ==========================================
+// ORDER MANAGEMENT
+// ==========================================
+
+enum OrderStatus {
+  PENDING          // Order placed, awaiting payment
+  CONFIRMED        // Payment confirmed, awaiting processing
+  PROCESSING       // Order is being prepared
+  SHIPPED          // Order has been shipped
+  DELIVERED        // Order delivered to customer
+  CANCELLED        // Order cancelled
+  REFUNDED         // Order refunded
+  ON_HOLD          // Order temporarily on hold
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentMethod {
+  CASH_ON_DELIVERY
+  CREDIT_CARD
+  DEBIT_CARD
+  BANK_TRANSFER
+  DIGITAL_WALLET
+  OTHER
+}
+
+model Order {
+  id              String         @id @default(uuid())
+  orderNumber     String         @unique @map("order_number")
+  
+  // Order status
+  status          OrderStatus    @default(PENDING)
+  paymentStatus   PaymentStatus  @default(PENDING) @map("payment_status")
+  paymentMethod   PaymentMethod? @map("payment_method")
+  
+  // Customer information (stored for historical record)
+  customerName    String         @map("customer_name")
+  customerEmail   String         @map("customer_email")
+  customerPhone   String?        @map("customer_phone")
+  
+  // Shipping address
+  shippingAddress String         @map("shipping_address")
+  shippingCity    String         @map("shipping_city")
+  shippingState   String?        @map("shipping_state")
+  shippingZip     String?        @map("shipping_zip")
+  shippingCountry String         @default("Philippines") @map("shipping_country")
+  
+  // Billing address (optional, if different from shipping)
+  billingAddress  String?        @map("billing_address")
+  billingCity     String?        @map("billing_city")
+  billingState    String?        @map("billing_state")
+  billingZip      String?        @map("billing_zip")
+  billingCountry  String?        @map("billing_country")
+  
+  // Order totals
+  subtotal        Float          // Sum of all item prices
+  shippingCost    Float          @default(0) @map("shipping_cost")
+  taxAmount       Float          @default(0) @map("tax_amount")
+  discountAmount  Float          @default(0) @map("discount_amount")
+  total           Float          // Final total
+  
+  // Additional info
+  notes           String?        // Customer notes
+  internalNotes   String?        @map("internal_notes") // Admin notes
+  trackingNumber  String?        @map("tracking_number")
+  shippingCarrier String?        @map("shipping_carrier")
+  
+  // Timestamps
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  shippedAt       DateTime?      @map("shipped_at")
+  deliveredAt     DateTime?      @map("delivered_at")
+  cancelledAt     DateTime?      @map("cancelled_at")
+  
+  // Relations
+  items           OrderItem[]
+  statusHistory   OrderStatusHistory[]
+  
+  // Performance indexes
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([customerEmail])
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([paymentStatus, createdAt])
+  @@index([customerName])
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String          @id @default(uuid())
+  orderId         String          @map("order_id")
+  
+  // Product reference (stored for historical record even if product is deleted)
+  productId       String?         @map("product_id")
+  productName     String          @map("product_name")
+  productSku      String?         @map("product_sku")
+  productImage    String?         @map("product_image")
+  
+  // Variant info (if applicable)
+  variantId       String?         @map("variant_id")
+  variantName     String?         @map("variant_name")
+  variantOptions  Json?           @map("variant_options") // {"color": "Red", "size": "L"}
+  
+  // Pricing at time of order
+  unitPrice       Float           @map("unit_price")
+  quantity        Int
+  subtotal        Float           // unitPrice * quantity
+  
+  // Timestamps
+  createdAt       DateTime        @default(now()) @map("created_at")
+  
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model OrderStatusHistory {
+  id          String      @id @default(uuid())
+  orderId     String      @map("order_id")
+  
+  fromStatus  OrderStatus? @map("from_status")
+  toStatus    OrderStatus  @map("to_status")
+  note        String?
+  changedBy   String?      @map("changed_by") // User ID or name who made the change
+  
+  createdAt   DateTime    @default(now()) @map("created_at")
+  
+  order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  @@index([orderId])
+  @@index([createdAt])
+  @@map("order_status_history")
+}

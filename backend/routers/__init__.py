@@ -1,0 +1,19 @@
+# Routers package
+# All API routers are organized here
+
+from .auth import router as auth_router
+from .categories import router as categories_router
+from .upload import router as upload_router
+from .attributes import router as attributes_router
+from .products import router as products_router
+from .orders import router as orders_router
+
+__all__ = [
+    "auth_router",
+    "categories_router",
+    "upload_router",
+    "attributes_router",
+    "products_router",
+    "orders_router",
+]
+

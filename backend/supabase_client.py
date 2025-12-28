@@ -2,9 +2,11 @@ from supabase import create_client, Client
 import os
 from functools import lru_cache
 from dotenv import load_dotenv
+from pathlib import Path
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from root .env file (parent directory)
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 @lru_cache()
 def get_supabase_client() -> Client:
