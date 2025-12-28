@@ -77,6 +77,11 @@ import {
   IconSettings,
   IconFolder,
   IconFolderOpen,
+  IconInfoCircle,
+  IconPhoto,
+  IconBox,
+  IconTags,
+  IconCrop,
 } from "@tabler/icons-react"
 
 import { productSchema, type ProductFormData } from "@/lib/validations/product"
@@ -96,6 +101,7 @@ import {
 import { useSidebar } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 import { LoadingState } from "@/components/ui/loading-state"
+import { ImageCropModal } from "@/components/shared"
 
 interface ProductFormProps {
   product?: Product
@@ -115,6 +121,10 @@ interface LocalImage {
   is_primary: boolean
   file?: File
   isNew?: boolean
+  croppedBlob?: Blob // Stores cropped image until form submission
+  originalUrl?: string // Original URL before cropping (for cropping source)
+  cropAspectRatio?: number // Last used aspect ratio for cropping (0 = Free)
+  cropArea?: { x: number; y: number; width: number; height: number } // Last crop position (percentages)
 }
 
 interface LocalVariant {
@@ -134,9 +144,11 @@ interface LocalVariant {
 function PrimaryMediaDisplay({
   image,
   onRemove,
+  onCrop,
 }: {
   image: LocalImage
   onRemove: () => void
+  onCrop: () => void
 }) {
   return (
     <div className="relative group rounded-xl overflow-hidden bg-muted transition-all border-2 border-dashed border-muted-foreground/20 aspect-square md:aspect-[16/9] w-full">
@@ -154,18 +166,34 @@ function PrimaryMediaDisplay({
 
       {/* Hover Overlay */}
       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 z-20">
-        <Button
-          type="button"
-          variant="destructive"
-          size="icon"
-          className="h-9 w-9 bg-red-500 hover:bg-red-600 text-white border-none shadow-lg"
-          onClick={(e) => {
-            e.stopPropagation()
-            onRemove()
-          }}
-        >
-          <IconTrash className="h-5 w-5" />
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="h-9 w-9 bg-white hover:bg-white/90 text-black border-none shadow-lg"
+            onClick={(e) => {
+              e.stopPropagation()
+              onCrop()
+            }}
+            title="Crop image"
+          >
+            <IconCrop className="h-5 w-5" />
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon"
+            className="h-9 w-9 bg-red-500 hover:bg-red-600 text-white border-none shadow-lg"
+            onClick={(e) => {
+              e.stopPropagation()
+              onRemove()
+            }}
+            title="Remove image"
+          >
+            <IconTrash className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -176,10 +204,12 @@ function SortableThumbnailItem({
   image,
   onRemove,
   onSetPrimary,
+  onCrop,
 }: {
   image: LocalImage
   onRemove: () => void
   onSetPrimary: () => void
+  onCrop: () => void
 }) {
   const {
     attributes,
@@ -235,18 +265,34 @@ function SortableThumbnailItem({
         >
           Set Primary
         </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          size="icon"
-          className="h-7 w-7 bg-red-500 hover:bg-red-600 text-white border-none shadow-lg"
-          onClick={(e) => {
-            e.stopPropagation()
-            onRemove()
-          }}
-        >
-          <IconTrash className="h-4 w-4" />
-        </Button>
+        <div className="flex gap-1.5">
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="h-7 w-7 bg-white hover:bg-white/90 text-black border-none shadow-lg"
+            onClick={(e) => {
+              e.stopPropagation()
+              onCrop()
+            }}
+            title="Crop image"
+          >
+            <IconCrop className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon"
+            className="h-7 w-7 bg-red-500 hover:bg-red-600 text-white border-none shadow-lg"
+            onClick={(e) => {
+              e.stopPropagation()
+              onRemove()
+            }}
+            title="Remove image"
+          >
+            <IconTrash className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -279,6 +325,13 @@ export function ProductForm({
     return []
   })
   const [uploadingImages, setUploadingImages] = useState(false)
+  
+  // State for image cropping
+  const [cropModalOpen, setCropModalOpen] = useState(false)
+  const [imageToCropId, setImageToCropId] = useState<string | null>(null)
+  
+  // Get the current image from localImages (ensures we always have latest version including cropped blob URL)
+  const imageToCrop = imageToCropId ? localImages.find(img => img.id === imageToCropId) : null
 
   // Local state for variants
   const [variants, setVariants] = useState<LocalVariant[]>(() => {
@@ -438,7 +491,143 @@ export function ProductForm({
   const formValues = form.watch()
   const { isDirty } = form.formState
 
+  // Compare form values with original product values
+  const formValuesChanged = useMemo(() => {
+    // Don't check for changes until form is initialized
+    if (!isInitialized && product) {
+      return false
+    }
+
+    if (!product) {
+      // For new products, check if any required fields are filled
+      return !!(
+        formValues.name ||
+        formValues.description ||
+        formValues.category_id ||
+        formValues.base_price > 0 ||
+        localImages.length > 0 ||
+        variants.length > 0
+      )
+    }
+
+    const currentValues = formValues
+    const originalValues = {
+      name: product.name || "",
+      description: product.description || "",
+      short_description: product.short_description || "",
+      sku: product.sku || "",
+      status: (product.status as ProductStatus) || "DRAFT",
+      base_price: product.base_price || 0,
+      sale_price: product.sale_price ?? undefined,
+      cost_price: product.cost_price ?? undefined,
+      category_id: product.category_id || "",
+      stock: product.stock || 0,
+      low_stock_threshold: product.low_stock_threshold ?? undefined,
+      track_inventory: product.track_inventory ?? true,
+      weight: product.weight ?? undefined,
+      length: product.length ?? undefined,
+      width: product.width ?? undefined,
+      height: product.height ?? undefined,
+      meta_title: product.meta_title || "",
+      meta_description: product.meta_description || "",
+      is_featured: product.is_featured || false,
+      has_variants: product.has_variants || false,
+      attribute_values: (product.attribute_values || []).map((av) => ({
+        attribute_id: av.attribute_id,
+        value: av.value,
+      })),
+    }
+
+    // Normalize values for comparison (handle undefined/null/empty string differences)
+    const normalize = (val: any) => {
+      if (val === null || val === undefined || val === "") return undefined
+      if (typeof val === "number") return val === 0 ? 0 : val // Preserve 0
+      if (typeof val === "boolean") return val
+      if (Array.isArray(val)) {
+        if (val.length === 0) return undefined
+        // For attribute_values array, sort by attribute_id for consistent comparison
+        const sorted = [...val].sort((a, b) => {
+          if (a.attribute_id && b.attribute_id) {
+            return a.attribute_id.localeCompare(b.attribute_id)
+          }
+          return JSON.stringify(a).localeCompare(JSON.stringify(b))
+        })
+        return JSON.stringify(sorted)
+      }
+      const str = String(val).trim()
+      return str === "" ? undefined : str
+    }
+
+    // Compare each field with proper type handling
+    const compareField = (field: string, current: any, original: any): boolean => {
+      
+      // Handle numbers - compare as numbers, treating null/undefined/empty as undefined
+      if (typeof original === "number" || typeof current === "number" || field === "base_price" || field === "sale_price" || field === "cost_price" || field === "stock" || field === "low_stock_threshold" || field === "weight" || field === "length" || field === "width" || field === "height") {
+        const currNum = current === "" || current === null || current === undefined ? undefined : Number(current)
+        const origNum = original === "" || original === null || original === undefined ? undefined : Number(original)
+        if (currNum !== origNum && !(isNaN(currNum as number) && isNaN(origNum as number))) {
+          return true
+        }
+        return false
+      }
+      
+      // Handle booleans
+      if (typeof original === "boolean" || typeof current === "boolean" || field === "is_featured" || field === "has_variants" || field === "track_inventory") {
+        if (Boolean(current) !== Boolean(original)) {
+          return true
+        }
+        return false
+      }
+      
+      // Handle strings and other types
+      return normalize(current) !== normalize(original)
+    }
+
+    const fields: Array<[string, any, any]> = [
+      ["name", currentValues.name, originalValues.name],
+      ["description", currentValues.description, originalValues.description],
+      ["short_description", currentValues.short_description, originalValues.short_description],
+      ["sku", currentValues.sku, originalValues.sku],
+      ["status", currentValues.status, originalValues.status],
+      ["base_price", currentValues.base_price, originalValues.base_price],
+      ["sale_price", currentValues.sale_price, originalValues.sale_price],
+      ["cost_price", currentValues.cost_price, originalValues.cost_price],
+      ["category_id", currentValues.category_id, originalValues.category_id],
+      ["stock", currentValues.stock, originalValues.stock],
+      ["low_stock_threshold", currentValues.low_stock_threshold, originalValues.low_stock_threshold],
+      ["track_inventory", currentValues.track_inventory, originalValues.track_inventory],
+      ["weight", currentValues.weight, originalValues.weight],
+      ["length", currentValues.length, originalValues.length],
+      ["width", currentValues.width, originalValues.width],
+      ["height", currentValues.height, originalValues.height],
+      ["meta_title", currentValues.meta_title, originalValues.meta_title],
+      ["meta_description", currentValues.meta_description, originalValues.meta_description],
+      ["is_featured", currentValues.is_featured, originalValues.is_featured],
+      ["has_variants", currentValues.has_variants, originalValues.has_variants],
+    ]
+
+    for (const [field, current, original] of fields) {
+      if (compareField(field, current, original)) {
+        return true
+      }
+    }
+
+    // Compare attribute_values
+    const currentAttrs = normalize(currentValues.attribute_values)
+    const originalAttrs = normalize(originalValues.attribute_values)
+    if (currentAttrs !== originalAttrs) {
+      return true
+    }
+
+    return false
+  }, [formValues, product, localImages.length, variants.length, isInitialized])
+
   const imagesChanged = useMemo(() => {
+    // Don't check for changes until form is initialized
+    if (!isInitialized && product) {
+      return false
+    }
+
     if (!product) return localImages.length > 0
     
     const originalImages = [...(product.images || [])]
@@ -472,9 +661,14 @@ export function ProductForm({
         img.display_order !== orig.display_order
       )
     })
-  }, [localImages, product])
+  }, [localImages, product, isInitialized])
 
   const variantsChanged = useMemo(() => {
+    // Don't check for changes until form is initialized
+    if (!isInitialized && product) {
+      return false
+    }
+
     if (!product) return variants.length > 0
     
     const originalVariants = (product.variants || []).map(v => ({
@@ -543,19 +737,53 @@ export function ProductForm({
       if (!curr) return true
       return normalizeForComparison(orig) !== normalizeForComparison(curr)
     })
-  }, [variants, product])
+  }, [variants, product, isInitialized])
 
-  const hasChanges = isDirty || imagesChanged || variantsChanged
+  const hasChanges = formValuesChanged || imagesChanged || variantsChanged
 
-  const handleFormSubmit = (values: ProductFormData) => {
+  const handleFormSubmit = async (values: ProductFormData) => {
+    // First, upload any cropped images that haven't been uploaded yet
+    const updatedImages = await Promise.all(
+      localImages.map(async (img) => {
+        if (img.croppedBlob) {
+          // Upload the cropped image
+          try {
+            const file = new File([img.croppedBlob], `cropped-${Date.now()}.jpg`, {
+              type: "image/jpeg",
+            })
+            const result = await uploadApi.uploadImage(file, {
+              folder: "products",
+              bucket: "products",
+              product_id: product?.id,
+            })
+            // Revoke the blob URL to free memory
+            if (img.url.startsWith("blob:")) {
+              URL.revokeObjectURL(img.url)
+            }
+            return {
+              url: result.url,
+              alt_text: img.alt_text,
+              display_order: img.display_order,
+              is_primary: img.is_primary,
+            }
+          } catch (error) {
+            console.error("Failed to upload cropped image:", error)
+            toast.error("Failed to upload cropped image")
+            throw error
+          }
+        }
+        return {
+          url: img.url,
+          alt_text: img.alt_text,
+          display_order: img.display_order,
+          is_primary: img.is_primary,
+        }
+      })
+    )
+
     const finalData = {
       ...values,
-      images: localImages.map(img => ({
-        url: img.url,
-        alt_text: img.alt_text,
-        display_order: img.display_order,
-        is_primary: img.is_primary
-      })),
+      images: updatedImages,
       variants: variants.map(v => ({
         name: v.name,
         sku: v.sku,
@@ -628,6 +856,47 @@ export function ProductForm({
       const reordered = arrayMove(prev, oldIndex, newIndex)
       return reordered.map((img, idx) => ({ ...img, display_order: idx }))
     })
+  }
+
+  // Image cropping handlers
+  const handleOpenCropModal = (imageId: string) => {
+    setImageToCropId(imageId)
+    setCropModalOpen(true)
+  }
+
+  const handleCloseCropModal = () => {
+    setCropModalOpen(false)
+    setImageToCropId(null)
+  }
+
+  const handleCropComplete = async (
+    croppedBlob: Blob, 
+    aspectRatio?: number,
+    cropArea?: { x: number; y: number; width: number; height: number }
+  ) => {
+    if (!imageToCropId) return
+
+    // Create a local blob URL for preview (no upload yet)
+    const blobUrl = URL.createObjectURL(croppedBlob)
+
+    // Update the local image with the cropped preview
+    setLocalImages((prev) =>
+      prev.map((img) =>
+        img.id === imageToCropId
+          ? {
+              ...img,
+              url: blobUrl, // Use blob URL for preview
+              originalUrl: img.originalUrl || img.url, // Keep original URL (for re-cropping from source)
+              croppedBlob: croppedBlob, // Store blob for later upload
+              cropAspectRatio: aspectRatio, // Remember the aspect ratio used
+              cropArea: cropArea, // Remember the crop position/size
+              isNew: true, // Mark as modified
+            }
+          : img
+      )
+    )
+
+    toast.success("Image cropped - click Save to apply changes")
   }
 
   // Variant handling
@@ -723,7 +992,12 @@ export function ProductForm({
             <div className="lg:col-span-2 space-y-12">
               {/* General Information */}
               <FieldSet>
-                <FieldLegend>General Information</FieldLegend>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="p-2 bg-primary/10 rounded-lg">
+                    <IconInfoCircle className="h-5 w-5 text-primary" />
+                  </div>
+                  <FieldLegend className="mb-0">General Information</FieldLegend>
+                </div>
                 <FieldGroup>
                   <Field data-invalid={form.formState.errors.name ? true : undefined}>
                     <FieldLabel htmlFor="name" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Product Name *</FieldLabel>
@@ -810,7 +1084,12 @@ export function ProductForm({
 
               {/* Product Media */}
               <FieldSet>
-                <FieldLegend>Product Media</FieldLegend>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="p-2 bg-primary/10 rounded-lg">
+                    <IconPhoto className="h-5 w-5 text-primary" />
+                  </div>
+                  <FieldLegend className="mb-0">Product Media</FieldLegend>
+                </div>
                 <div className="w-full">
                   <div className="w-full">
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -821,6 +1100,7 @@ export function ProductForm({
                               <PrimaryMediaDisplay
                                 image={primaryImage}
                                 onRemove={() => handleRemoveImage(primaryImage.id)}
+                                onCrop={() => handleOpenCropModal(primaryImage.id)}
                               />
                             ) : (
                               <div className="relative aspect-square md:aspect-[16/9] rounded-xl border-2 border-dashed border-muted-foreground/20 overflow-hidden bg-muted/30 flex flex-col items-center justify-center text-muted-foreground p-6 text-center w-full">
@@ -840,6 +1120,7 @@ export function ProductForm({
                                   image={image}
                                   onRemove={() => handleRemoveImage(image.id)}
                                   onSetPrimary={() => handleSetPrimary(image.id)}
+                                  onCrop={() => handleOpenCropModal(image.id)}
                                 />
                               ))}
                             </SortableContext>
@@ -872,9 +1153,14 @@ export function ProductForm({
               {/* Variants & Options */}
               <FieldSet>
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                  <div>
-                    <FieldLegend className="mb-1">Variants & Options</FieldLegend>
-                    <p className="text-sm text-muted-foreground">Manage different versions of your product.</p>
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <IconBox className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <FieldLegend className="mb-1">Variants & Options</FieldLegend>
+                      <p className="text-sm text-muted-foreground">Manage different versions of your product.</p>
+                    </div>
                   </div>
                   <div className="flex items-center space-x-2 bg-muted/50 px-3 py-1.5 rounded-lg border">
                     <Checkbox 
@@ -1165,15 +1451,23 @@ export function ProductForm({
               {/* Product Attributes */}
               {selectedCategoryId && (
                 <FieldSet>
-                  <FieldLegend>Product Attributes</FieldLegend>
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <IconTags className="h-5 w-5 text-primary" />
+                    </div>
+                    <FieldLegend className="mb-0">Product Attributes</FieldLegend>
+                  </div>
                   <div className="space-y-6">
                     {isAttributesLoading ? (
                       <LoadingState variant="centered" text="Retrieving category attributes..." />
                     ) : categoryAttributes.length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-muted/10 p-6 rounded-xl border border-dashed border-muted-foreground/20">
                         {categoryAttributes.map((attr) => {
+                          // Get current value from form values directly
+                          const allAttributeValues = form.watch("attribute_values") || []
+                          const existingValue = allAttributeValues.find((av: any) => av.attribute_id === attr.id)
+                          const currentValue = existingValue?.value || ""
                           const fieldIndex = attributeFields.findIndex(f => f.attribute_id === attr.id)
-                          const currentValue = fieldIndex !== -1 ? form.watch(`attribute_values.${fieldIndex}.value`) : ""
                           
                           return (
                             <Field key={attr.id}>
@@ -1184,7 +1478,8 @@ export function ProductForm({
                                 {attr.type === "SELECT" && attr.options ? (
                                   <Select 
                                     onValueChange={(val) => {
-                                      const idx = attributeFields.findIndex(f => f.attribute_id === attr.id)
+                                      const allValues = form.getValues("attribute_values") || []
+                                      const idx = allValues.findIndex((av: any) => av.attribute_id === attr.id)
                                       if (idx === -1) {
                                         appendAttribute({ attribute_id: attr.id, value: val })
                                       } else {
@@ -1208,7 +1503,8 @@ export function ProductForm({
                                       id={`attr-${attr.id}`}
                                       checked={currentValue === "true"}
                                       onCheckedChange={(val) => {
-                                        const idx = attributeFields.findIndex(f => f.attribute_id === attr.id)
+                                        const allValues = form.getValues("attribute_values") || []
+                                        const idx = allValues.findIndex((av: any) => av.attribute_id === attr.id)
                                         if (idx === -1) {
                                           appendAttribute({ attribute_id: attr.id, value: val ? "true" : "false" })
                                         } else {
@@ -1229,7 +1525,8 @@ export function ProductForm({
                                     value={currentValue}
                                     onChange={(e) => {
                                       const val = e.target.value
-                                      const idx = attributeFields.findIndex(f => f.attribute_id === attr.id)
+                                      const allValues = form.getValues("attribute_values") || []
+                                      const idx = allValues.findIndex((av: any) => av.attribute_id === attr.id)
                                       if (idx === -1) {
                                         appendAttribute({ attribute_id: attr.id, value: val })
                                       } else {
@@ -1258,8 +1555,8 @@ export function ProductForm({
             {/* Sidebar Column */}
             <div className="lg:col-span-1 space-y-12">
               {/* Product Visibility */}
-              <FieldSet className="p-6 rounded-xl border bg-muted/10">
-                <FieldLegend className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Product Visibility</FieldLegend>
+              <FieldSet className="p-6 border border-border/50 rounded-2xl">
+                <FieldLegend variant="label" className="text-xs uppercase tracking-widest font-black text-muted-foreground/80 mb-4">Product Visibility</FieldLegend>
                 <FieldGroup>
                   <Field data-invalid={form.formState.errors.status ? true : undefined}>
                     <FieldLabel htmlFor="status" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Status</FieldLabel>
@@ -1296,8 +1593,8 @@ export function ProductForm({
               </FieldSet>
 
               {/* Pricing */}
-              <FieldSet className="p-6 rounded-xl border bg-muted/10">
-                <FieldLegend className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pricing</FieldLegend>
+              <FieldSet className="p-6 border border-border/50 rounded-2xl">
+                <FieldLegend variant="label" className="text-xs uppercase tracking-widest font-black text-muted-foreground/80 mb-4">Pricing</FieldLegend>
                 <FieldGroup>
                   <Field data-invalid={form.formState.errors.base_price ? true : undefined}>
                     <FieldLabel htmlFor="base_price" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Base Price *</FieldLabel>
@@ -1362,8 +1659,8 @@ export function ProductForm({
               </FieldSet>
 
               {/* Inventory */}
-              <FieldSet className="p-6 rounded-xl border bg-muted/10">
-                <FieldLegend className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-2">Inventory</FieldLegend>
+              <FieldSet className="p-6 border border-border/50 rounded-2xl">
+                <FieldLegend variant="label" className="text-xs uppercase tracking-widest font-black text-muted-foreground/80 mb-4">Inventory</FieldLegend>
                 <FieldGroup>
                   <div className="flex items-center justify-between -mt-2 mb-2 p-3 rounded-lg bg-background/50 border border-dashed border-muted-foreground/20">
                     <Label htmlFor="track_inventory" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground leading-none cursor-pointer">Track Stock</Label>
@@ -1393,13 +1690,19 @@ export function ProductForm({
               </FieldSet>
 
               {/* Physical Properties */}
-              <FieldSet className="p-6 rounded-xl border bg-muted/10">
-                <FieldLegend className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Physical Properties</FieldLegend>
+              <FieldSet className="p-6 border border-border/50 rounded-2xl">
+                <FieldLegend variant="label" className="text-xs uppercase tracking-widest font-black text-muted-foreground/80 mb-4">Physical Properties</FieldLegend>
                 <FieldGroup>
                   <Field>
                     <FieldLabel htmlFor="weight" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Weight (kg)</FieldLabel>
                     <FormControl>
-                      <Input id="weight" type="number" step="0.01" min="0" placeholder="0.00" className="h-10" {...form.register("weight", { valueAsNumber: true, setValueAs: (v) => v === "" ? undefined : parseFloat(v) })} />
+                      <Input id="weight" type="number" step="0.01" min="0" placeholder="0.00" className="h-10" {...form.register("weight", { 
+                        setValueAs: (v) => {
+                          if (v === "" || v === null || v === undefined || v === "0" || v === 0) return undefined
+                          const num = typeof v === "number" ? v : parseFloat(String(v))
+                          return isNaN(num) || num <= 0 ? undefined : num
+                        }
+                      })} />
                     </FormControl>
                   </Field>
                   <div className="space-y-3">
@@ -1408,19 +1711,37 @@ export function ProductForm({
                       <Field>
                         <FieldLabel htmlFor="length" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Length</FieldLabel>
                         <FormControl>
-                          <Input id="length" type="number" step="0.1" min="0" className="h-9 text-sm" {...form.register("length", { valueAsNumber: true, setValueAs: (v) => v === "" ? undefined : parseFloat(v) })} />
+                          <Input id="length" type="number" step="0.1" min="0" className="h-9 text-sm" {...form.register("length", { 
+                            setValueAs: (v) => {
+                              if (v === "" || v === null || v === undefined || v === "0" || v === 0) return undefined
+                              const num = typeof v === "number" ? v : parseFloat(String(v))
+                              return isNaN(num) || num <= 0 ? undefined : num
+                            }
+                          })} />
                         </FormControl>
                       </Field>
                       <Field>
                         <FieldLabel htmlFor="width" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Width</FieldLabel>
                         <FormControl>
-                          <Input id="width" type="number" step="0.1" min="0" className="h-9 text-sm" {...form.register("width", { valueAsNumber: true, setValueAs: (v) => v === "" ? undefined : parseFloat(v) })} />
+                          <Input id="width" type="number" step="0.1" min="0" className="h-9 text-sm" {...form.register("width", { 
+                            setValueAs: (v) => {
+                              if (v === "" || v === null || v === undefined || v === "0" || v === 0) return undefined
+                              const num = typeof v === "number" ? v : parseFloat(String(v))
+                              return isNaN(num) || num <= 0 ? undefined : num
+                            }
+                          })} />
                         </FormControl>
                       </Field>
                       <Field>
                         <FieldLabel htmlFor="height" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Height</FieldLabel>
                         <FormControl>
-                          <Input id="height" type="number" step="0.1" min="0" className="h-9 text-sm" {...form.register("height", { valueAsNumber: true, setValueAs: (v) => v === "" ? undefined : parseFloat(v) })} />
+                          <Input id="height" type="number" step="0.1" min="0" className="h-9 text-sm" {...form.register("height", { 
+                            setValueAs: (v) => {
+                              if (v === "" || v === null || v === undefined || v === "0" || v === 0) return undefined
+                              const num = typeof v === "number" ? v : parseFloat(String(v))
+                              return isNaN(num) || num <= 0 ? undefined : num
+                            }
+                          })} />
                         </FormControl>
                       </Field>
                     </div>
@@ -1429,8 +1750,8 @@ export function ProductForm({
               </FieldSet>
 
               {/* Search Optimization */}
-              <FieldSet className="p-6 rounded-xl border bg-muted/10">
-                <FieldLegend className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Search Optimization (SEO)</FieldLegend>
+              <FieldSet className="p-6 border border-border/50 rounded-2xl">
+                <FieldLegend variant="label" className="text-xs uppercase tracking-widest font-black text-muted-foreground/80 mb-4">Search Optimization (SEO)</FieldLegend>
                 <FieldGroup>
                   <Field data-invalid={form.formState.errors.meta_title ? true : undefined}>
                     <FieldLabel htmlFor="meta_title" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta Title</FieldLabel>
@@ -1481,6 +1802,21 @@ export function ProductForm({
           </div>
         </form>
       </Form>
+
+      {/* Image Crop Modal */}
+      {imageToCrop && (
+        <ImageCropModal
+          key={imageToCrop.id} // Re-mount when image changes
+          open={cropModalOpen}
+          onClose={handleCloseCropModal}
+          imageSrc={imageToCrop.originalUrl || imageToCrop.url} // Use original for re-cropping
+          previewSrc={imageToCrop.croppedBlob ? imageToCrop.url : undefined} // Show current crop preview
+          onCropComplete={handleCropComplete}
+          aspectRatio={imageToCrop.cropAspectRatio} // Use stored aspect ratio (0 = Free, undefined = default 1:1)
+          initialCrop={imageToCrop.cropArea} // Restore previous crop position/size
+          title="Crop Product Image"
+        />
+      )}
     </div>
   )
 }

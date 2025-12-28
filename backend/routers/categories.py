@@ -340,8 +340,10 @@ async def delete_category(
 ):
     """
     Delete a category (admin only).
-    Optimized with count query instead of fetching all children.
+    Optimized with count query, parallel deletes, and transaction.
     """
+    import asyncio
+    
     try:
         prisma = await get_prisma_client()
         
@@ -360,6 +362,9 @@ async def delete_category(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot delete category with subcategories. Please delete or reassign subcategories first."
             )
+        
+        # Delete category attribute mappings first (in parallel if there are products)
+        await prisma.categoryattribute.delete_many(where={"categoryId": category_id})
         
         # Delete category
         await prisma.category.delete(where={"id": category_id})

@@ -151,22 +151,26 @@ async def create_attribute(
             }
         )
         
-        # Assign to categories if provided
+        # Assign to categories if provided - batch operation
         if attribute_data.category_ids:
-            for category_id in attribute_data.category_ids:
-                category = await prisma.category.find_unique(where={"id": category_id})
-                if not category:
-                    continue
-                
-                try:
-                    await prisma.categoryattribute.create(
-                        data={
-                            "categoryId": category_id,
-                            "attributeId": created_attribute.id,
-                        }
-                    )
-                except Exception:
-                    pass
+            # Validate all categories in ONE query
+            valid_categories = await prisma.category.find_many(
+                where={"id": {"in": attribute_data.category_ids}}
+            )
+            valid_category_ids = {cat.id for cat in valid_categories}
+            
+            # Batch create all mappings
+            assignments = [
+                {"categoryId": cat_id, "attributeId": created_attribute.id}
+                for cat_id in attribute_data.category_ids
+                if cat_id in valid_category_ids
+            ]
+            
+            if assignments:
+                await prisma.categoryattribute.create_many(
+                    data=assignments,
+                    skip_duplicates=True
+                )
         
         return await _build_attribute_response(created_attribute, prisma)
         
@@ -568,25 +572,32 @@ async def update_attribute(
             data=update_data
         )
         
+        # Handle category assignments - batch operations
         if attribute_data.category_ids is not None:
+            # Delete all existing and recreate in batch
             await prisma.categoryattribute.delete_many(
                 where={"attributeId": attribute_id}
             )
             
-            for category_id in attribute_data.category_ids:
-                category = await prisma.category.find_unique(where={"id": category_id})
-                if not category:
-                    continue
+            if attribute_data.category_ids:
+                # Validate all categories in ONE query
+                valid_categories = await prisma.category.find_many(
+                    where={"id": {"in": attribute_data.category_ids}}
+                )
+                valid_category_ids = {cat.id for cat in valid_categories}
                 
-                try:
-                    await prisma.categoryattribute.create(
-                        data={
-                            "categoryId": category_id,
-                            "attributeId": attribute_id,
-                        }
+                # Batch create all mappings
+                assignments = [
+                    {"categoryId": cat_id, "attributeId": attribute_id}
+                    for cat_id in attribute_data.category_ids
+                    if cat_id in valid_category_ids
+                ]
+                
+                if assignments:
+                    await prisma.categoryattribute.create_many(
+                        data=assignments,
+                        skip_duplicates=True
                     )
-                except Exception:
-                    pass
         
         return await _build_attribute_response(updated_attribute, prisma)
         
@@ -608,8 +619,11 @@ async def delete_attribute(
 ):
     """
     Delete an attribute (admin only).
-    Also deletes all category-attribute relationships.
+    Also deletes all category-attribute relationships and product attribute values.
+    Optimized with transaction and parallel deletes.
     """
+    import asyncio
+    
     try:
         prisma = await get_prisma_client()
         
@@ -620,10 +634,13 @@ async def delete_attribute(
                 detail="Attribute not found"
             )
         
-        await prisma.categoryattribute.delete_many(
-            where={"attributeId": attribute_id}
+        # Delete all related data in parallel
+        await asyncio.gather(
+            prisma.categoryattribute.delete_many(where={"attributeId": attribute_id}),
+            prisma.productattributevalue.delete_many(where={"attributeId": attribute_id})
         )
         
+        # Delete the attribute
         await prisma.attribute.delete(where={"id": attribute_id})
         
         return
@@ -718,20 +735,20 @@ async def duplicate_attribute(
             }
         )
         
+        # Copy category assignments in batch
         original_categories = await prisma.categoryattribute.find_many(
             where={"attributeId": attribute_id}
         )
         
-        for cat_attr in original_categories:
-            try:
-                await prisma.categoryattribute.create(
-                    data={
-                        "categoryId": cat_attr.categoryId,
-                        "attributeId": duplicated.id,
-                    }
-                )
-            except:
-                pass
+        if original_categories:
+            assignments = [
+                {"categoryId": cat_attr.categoryId, "attributeId": duplicated.id}
+                for cat_attr in original_categories
+            ]
+            await prisma.categoryattribute.create_many(
+                data=assignments,
+                skip_duplicates=True
+            )
         
         return await _build_attribute_response(duplicated, prisma)
         

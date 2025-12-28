@@ -350,7 +350,9 @@ async def create_product(
     product_data: ProductCreate,
     current_admin=Depends(get_current_admin)
 ):
-    """Create a new product (admin only)."""
+    """Create a new product (admin only). Optimized for performance."""
+    import asyncio
+    
     try:
         prisma = await get_prisma_client()
         
@@ -393,47 +395,54 @@ async def create_product(
             }
         )
         
-        # Create images if provided
+        # Batch create related data in parallel
+        create_tasks = []
+        
         if product_data.images:
-            for img in product_data.images:
-                await prisma.productimage.create(
-                    data={
-                        "productId": product.id,
-                        "url": img.url,
-                        "altText": img.alt_text,
-                        "displayOrder": img.display_order,
-                        "isPrimary": img.is_primary,
-                    }
-                )
+            image_data = [
+                {
+                    "productId": product.id,
+                    "url": img.url,
+                    "altText": img.alt_text,
+                    "displayOrder": img.display_order,
+                    "isPrimary": img.is_primary,
+                }
+                for img in product_data.images
+            ]
+            create_tasks.append(prisma.productimage.create_many(data=image_data))
         
-        # Create variants if provided
         if product_data.variants:
-            for var in product_data.variants:
-                await prisma.productvariant.create(
-                    data={
-                        "productId": product.id,
-                        "sku": var.sku,
-                        "name": var.name,
-                        "price": var.price,
-                        "salePrice": var.sale_price,
-                        "stock": var.stock,
-                        "lowStockThreshold": var.low_stock_threshold,
-                        "isActive": var.is_active,
-                        "options": Json(var.options) if var.options else None,
-                        "imageUrl": var.image_url,
-                    }
-                )
+            variant_data = [
+                {
+                    "productId": product.id,
+                    "sku": var.sku,
+                    "name": var.name,
+                    "price": var.price,
+                    "salePrice": var.sale_price,
+                    "stock": var.stock,
+                    "lowStockThreshold": var.low_stock_threshold,
+                    "isActive": var.is_active,
+                    "options": Json(var.options) if var.options else None,
+                    "imageUrl": var.image_url,
+                }
+                for var in product_data.variants
+            ]
+            create_tasks.append(prisma.productvariant.create_many(data=variant_data))
         
-        # Create attribute values if provided
         if product_data.attribute_values:
-            for av in product_data.attribute_values:
-                await prisma.productattributevalue.create(
-                    data={
-                        "productId": product.id,
-                        "attributeId": av.attribute_id,
-                        "value": av.value,
-                    }
-                )
+            attr_data = [
+                {
+                    "productId": product.id,
+                    "attributeId": av.attribute_id,
+                    "value": av.value,
+                }
+                for av in product_data.attribute_values
+            ]
+            create_tasks.append(prisma.productattributevalue.create_many(data=attr_data))
+        
+        # Execute all creates in parallel
+        if create_tasks:
+            await asyncio.gather(*create_tasks)
         
         # Fetch complete product
         product = await prisma.product.find_unique(
@@ -465,7 +474,9 @@ async def update_product(
     product_data: ProductUpdate,
     current_admin=Depends(get_current_admin)
 ):
-    """Update an existing product (admin only)."""
+    """Update an existing product (admin only). Optimized for performance."""
+    import asyncio
+    
     try:
         prisma = await get_prisma_client()
         
@@ -480,114 +491,123 @@ async def update_product(
         # Build update data
         update_data = {}
         
-        if product_data.name is not None:
+        # Only regenerate slug if name actually changed
+        if product_data.name is not None and product_data.name != existing.name:
             update_data["name"] = product_data.name
             base_slug = generate_slug(product_data.name)
             update_data["slug"] = await ensure_unique_slug(base_slug, product_id)
+        elif product_data.name is not None:
+            update_data["name"] = product_data.name
         
-        if product_data.description is not None:
-            update_data["description"] = product_data.description
-        if product_data.short_description is not None:
-            update_data["shortDescription"] = product_data.short_description
-        if product_data.sku is not None:
-            update_data["sku"] = product_data.sku
+        # Map fields directly - avoid repeated None checks
+        field_mappings = {
+            "description": "description",
+            "short_description": "shortDescription",
+            "sku": "sku",
+            "base_price": "basePrice",
+            "sale_price": "salePrice",
+            "cost_price": "costPrice",
+            "stock": "stock",
+            "low_stock_threshold": "lowStockThreshold",
+            "track_inventory": "trackInventory",
+            "weight": "weight",
+            "length": "length",
+            "width": "width",
+            "height": "height",
+            "meta_title": "metaTitle",
+            "meta_description": "metaDescription",
+            "is_featured": "isFeatured",
+            "has_variants": "hasVariants",
+        }
+        
+        for py_field, db_field in field_mappings.items():
+            value = getattr(product_data, py_field, None)
+            if value is not None:
+                update_data[db_field] = value
+        
+        # Handle status separately (needs .value)
         if product_data.status is not None:
             update_data["status"] = product_data.status.value
-        if product_data.base_price is not None:
-            update_data["basePrice"] = product_data.base_price
-        if product_data.sale_price is not None:
-            update_data["salePrice"] = product_data.sale_price
-        if product_data.cost_price is not None:
-            update_data["costPrice"] = product_data.cost_price
+        
+        # Validate category if changed
         if product_data.category_id is not None:
-            # Validate category
-            category = await prisma.category.find_unique(where={"id": product_data.category_id})
-            if not category:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Category not found"
-                )
+            if product_data.category_id != existing.categoryId:
+                category = await prisma.category.find_unique(where={"id": product_data.category_id})
+                if not category:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Category not found"
+                    )
             update_data["categoryId"] = product_data.category_id
-        if product_data.stock is not None:
-            update_data["stock"] = product_data.stock
-        if product_data.low_stock_threshold is not None:
-            update_data["lowStockThreshold"] = product_data.low_stock_threshold
-        if product_data.track_inventory is not None:
-            update_data["trackInventory"] = product_data.track_inventory
-        if product_data.weight is not None:
-            update_data["weight"] = product_data.weight
-        if product_data.length is not None:
-            update_data["length"] = product_data.length
-        if product_data.width is not None:
-            update_data["width"] = product_data.width
-        if product_data.height is not None:
-            update_data["height"] = product_data.height
-        if product_data.meta_title is not None:
-            update_data["metaTitle"] = product_data.meta_title
-        if product_data.meta_description is not None:
-            update_data["metaDescription"] = product_data.meta_description
-        if product_data.is_featured is not None:
-            update_data["isFeatured"] = product_data.is_featured
-        if product_data.has_variants is not None:
-            update_data["hasVariants"] = product_data.has_variants
         
-        # Update product
-        if update_data:
-            await prisma.product.update(
-                where={"id": product_id},
-                data=update_data
-            )
+        # Prepare batch operations for related data
+        delete_tasks = []
         
-        # Update images if provided
         if product_data.images is not None:
-            # Delete existing images
-            await prisma.productimage.delete_many(where={"productId": product_id})
-            # Create new images
-            for img in product_data.images:
-                await prisma.productimage.create(
-                    data={
-                        "productId": product_id,
-                        "url": img.url,
-                        "altText": img.alt_text,
-                        "displayOrder": img.display_order,
-                        "isPrimary": img.is_primary,
-                    }
-                )
+            delete_tasks.append(prisma.productimage.delete_many(where={"productId": product_id}))
         
-        # Update variants if provided
         if product_data.variants is not None:
-            # Delete existing variants
-            await prisma.productvariant.delete_many(where={"productId": product_id})
-            # Create new variants
-            for var in product_data.variants:
-                await prisma.productvariant.create(
-                    data={
-                        "productId": product_id,
-                        "sku": var.sku,
-                        "name": var.name,
-                        "price": var.price,
-                        "salePrice": var.sale_price,
-                        "stock": var.stock,
-                        "lowStockThreshold": var.low_stock_threshold,
-                        "isActive": var.is_active,
-                        "options": Json(var.options) if var.options else None,
-                        "imageUrl": var.image_url,
-                    }
-                )
+            delete_tasks.append(prisma.productvariant.delete_many(where={"productId": product_id}))
         
-        # Update attribute values if provided
         if product_data.attribute_values is not None:
-            # Delete existing attribute values
-            await prisma.productattributevalue.delete_many(where={"productId": product_id})
-            # Create new attribute values
-            for av in product_data.attribute_values:
-                await prisma.productattributevalue.create(
-                    data={
-                        "productId": product_id,
-                        "attributeId": av.attribute_id,
-                        "value": av.value,
-                    }
-                )
+            delete_tasks.append(prisma.productattributevalue.delete_many(where={"productId": product_id}))
+        
+        # Execute all deletes in parallel with product update
+        if update_data or delete_tasks:
+            tasks = []
+            if update_data:
+                tasks.append(prisma.product.update(where={"id": product_id}, data=update_data))
+            tasks.extend(delete_tasks)
+            await asyncio.gather(*tasks)
+        
+        # Batch create new related data in parallel
+        create_tasks = []
+        
+        if product_data.images is not None and product_data.images:
+            image_data = [
+                {
+                    "productId": product_id,
+                    "url": img.url,
+                    "altText": img.alt_text,
+                    "displayOrder": img.display_order,
+                    "isPrimary": img.is_primary,
+                }
+                for img in product_data.images
+            ]
+            create_tasks.append(prisma.productimage.create_many(data=image_data))
+        
+        if product_data.variants is not None and product_data.variants:
+            variant_data = [
+                {
+                    "productId": product_id,
+                    "sku": var.sku,
+                    "name": var.name,
+                    "price": var.price,
+                    "salePrice": var.sale_price,
+                    "stock": var.stock,
+                    "lowStockThreshold": var.low_stock_threshold,
+                    "isActive": var.is_active,
+                    "options": Json(var.options) if var.options else None,
+                    "imageUrl": var.image_url,
+                }
+                for var in product_data.variants
+            ]
+            create_tasks.append(prisma.productvariant.create_many(data=variant_data))
+        
+        if product_data.attribute_values is not None and product_data.attribute_values:
+            attr_data = [
+                {
+                    "productId": product_id,
+                    "attributeId": av.attribute_id,
+                    "value": av.value,
+                }
+                for av in product_data.attribute_values
+            ]
+            create_tasks.append(prisma.productattributevalue.create_many(data=attr_data))
+        
+        # Execute all creates in parallel
+        if create_tasks:
+            await asyncio.gather(*create_tasks)
         
         # Fetch updated product
         product = await prisma.product.find_unique(
@@ -618,7 +638,9 @@ async def delete_product(
     product_id: str,
     current_admin=Depends(get_current_admin)
 ):
-    """Delete a product (admin only)."""
+    """Delete a product (admin only). Optimized for performance."""
+    import asyncio
+    
     try:
         prisma = await get_prisma_client()
         
@@ -630,10 +652,12 @@ async def delete_product(
                 detail="Product not found"
             )
         
-        # Delete related data first
-        await prisma.productimage.delete_many(where={"productId": product_id})
-        await prisma.productvariant.delete_many(where={"productId": product_id})
-        await prisma.productattributevalue.delete_many(where={"productId": product_id})
+        # Delete related data in parallel first
+        await asyncio.gather(
+            prisma.productimage.delete_many(where={"productId": product_id}),
+            prisma.productvariant.delete_many(where={"productId": product_id}),
+            prisma.productattributevalue.delete_many(where={"productId": product_id})
+        )
         
         # Delete product
         await prisma.product.delete(where={"id": product_id})
@@ -684,14 +708,18 @@ async def bulk_delete_products(
     data: ProductBulkDelete,
     current_admin=Depends(get_current_admin)
 ):
-    """Bulk delete products (admin only)."""
+    """Bulk delete products (admin only). Optimized for performance."""
+    import asyncio
+    
     try:
         prisma = await get_prisma_client()
         
-        # Delete related data first
-        await prisma.productimage.delete_many(where={"productId": {"in": data.product_ids}})
-        await prisma.productvariant.delete_many(where={"productId": {"in": data.product_ids}})
-        await prisma.productattributevalue.delete_many(where={"productId": {"in": data.product_ids}})
+        # Delete related data in parallel first
+        await asyncio.gather(
+            prisma.productimage.delete_many(where={"productId": {"in": data.product_ids}}),
+            prisma.productvariant.delete_many(where={"productId": {"in": data.product_ids}}),
+            prisma.productattributevalue.delete_many(where={"productId": {"in": data.product_ids}})
+        )
         
         # Delete products
         result = await prisma.product.delete_many(where={"id": {"in": data.product_ids}})

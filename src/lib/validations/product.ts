@@ -29,7 +29,7 @@ export const productVariantSchema = z.object({
   stock: z.number().int().min(0).default(0),
   low_stock_threshold: z.number().int().min(0).optional().nullable(),
   is_active: z.boolean().default(true),
-  options: z.record(z.string()).optional().nullable(),
+  options: z.record(z.string(), z.string()).optional().nullable(),
   image_url: z.string().url().optional().nullable(),
 })
 

@@ -148,7 +148,7 @@ async def create_order(
     # Generate unique order number
     order_number = generate_order_number()
     
-    # Create order with items in a transaction
+    # Create order with items in a transaction - optimized with batch operations
     async with prisma.tx() as tx:
         # Create the order
         order = await tx.order.create(
@@ -180,7 +180,8 @@ async def create_order(
             }
         )
         
-        # Create order items
+        # Batch create order items - much faster than individual creates
+        items_data = []
         for item in order_data.items:
             item_data = {
                 "orderId": order.id,
@@ -194,11 +195,13 @@ async def create_order(
                 "quantity": item.quantity,
                 "subtotal": item.unit_price * item.quantity,
             }
-            # Only include variantOptions if it has a value (JSON fields need special handling)
+            # Only include variantOptions if it has a value
             if item.variant_options:
                 item_data["variantOptions"] = item.variant_options
+            items_data.append(item_data)
             
-            await tx.orderitem.create(data=item_data)
+        if items_data:
+            await tx.orderitem.create_many(data=items_data)
         
         # Create initial status history
         await tx.orderstatushistory.create(
@@ -323,7 +326,7 @@ async def get_order(
     return build_order_response(order)
 
 
-@router.get("/number/{order_number}", response_model=OrderResponse)
+@router.get("/by-number/{order_number}", response_model=OrderResponse)
 async def get_order_by_number(
     order_number: str,
     current_user = Depends(get_current_user)
@@ -505,7 +508,10 @@ async def delete_order(
     order_id: str,
     current_admin = Depends(get_current_admin)
 ):
-    """Delete an order (Admin only) - Use with caution, prefer cancellation"""
+    """Delete an order (Admin only) - Use with caution, prefer cancellation.
+    Optimized with explicit parallel deletes for safety."""
+    import asyncio
+    
     await get_prisma()
     
     existing_order = await prisma.order.find_unique(where={"id": order_id})
@@ -515,7 +521,13 @@ async def delete_order(
             detail="Order not found"
         )
     
-    # Delete order (cascade will handle items and status history)
+    # Delete related data in parallel first (explicit is safer than cascade)
+    await asyncio.gather(
+        prisma.orderitem.delete_many(where={"orderId": order_id}),
+        prisma.orderstatushistory.delete_many(where={"orderId": order_id})
+    )
+    
+    # Delete the order
     await prisma.order.delete(where={"id": order_id})
     
     return None
@@ -529,36 +541,42 @@ async def delete_order(
 async def get_order_stats(
     current_user = Depends(get_current_user)
 ):
-    """Get order statistics summary"""
+    """Get order statistics summary - optimized with parallel queries"""
+    import asyncio
+    
     await get_prisma()
     
-    # Total orders
-    total_orders = await prisma.order.count()
-    
-    # Orders by status
-    pending_orders = await prisma.order.count(where={"status": "PENDING"})
-    confirmed_orders = await prisma.order.count(where={"status": "CONFIRMED"})
-    processing_orders = await prisma.order.count(where={"status": "PROCESSING"})
-    shipped_orders = await prisma.order.count(where={"status": "SHIPPED"})
-    delivered_orders = await prisma.order.count(where={"status": "DELIVERED"})
-    cancelled_orders = await prisma.order.count(where={"status": "CANCELLED"})
-    
-    # Payment status counts
-    pending_payment = await prisma.order.count(where={"paymentStatus": "PENDING"})
-    paid_orders = await prisma.order.count(where={"paymentStatus": "PAID"})
-    
-    # Revenue (from paid orders)
-    paid_order_list = await prisma.order.find_many(
-        where={"paymentStatus": "PAID"},
-        select={"total": True}
-    )
-    total_revenue = sum(order.total for order in paid_order_list)
-    
-    # Today's orders
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    todays_orders = await prisma.order.count(
-        where={"createdAt": {"gte": today_start}}
+    
+    # Execute ALL count queries in parallel - much faster than sequential
+    (
+        total_orders,
+        pending_orders,
+        confirmed_orders,
+        processing_orders,
+        shipped_orders,
+        delivered_orders,
+        cancelled_orders,
+        pending_payment,
+        paid_orders,
+        todays_orders,
+        paid_order_list
+    ) = await asyncio.gather(
+        prisma.order.count(),
+        prisma.order.count(where={"status": "PENDING"}),
+        prisma.order.count(where={"status": "CONFIRMED"}),
+        prisma.order.count(where={"status": "PROCESSING"}),
+        prisma.order.count(where={"status": "SHIPPED"}),
+        prisma.order.count(where={"status": "DELIVERED"}),
+        prisma.order.count(where={"status": "CANCELLED"}),
+        prisma.order.count(where={"paymentStatus": "PENDING"}),
+        prisma.order.count(where={"paymentStatus": "PAID"}),
+        prisma.order.count(where={"createdAt": {"gte": today_start}}),
+        prisma.order.find_many(where={"paymentStatus": "PAID"}, select={"total": True})
     )
+    
+    # Calculate revenue
+    total_revenue = sum(order.total for order in paid_order_list)
     
     return {
         "total_orders": total_orders,
