@@ -1,9 +1,9 @@
 import { getAuthenticatedUser } from "@/lib/auth"
-import { ProductView } from "@/components/products"
 import { AppLayout } from "@/components/app-layout"
 import { Button } from "@/components/ui/button"
 import { IconEdit } from "@tabler/icons-react"
 import Link from "next/link"
+import { ProductViewWrapper } from "./product-view-wrapper"
 
 interface ProductPageProps {
   params: Promise<{
@@ -31,7 +31,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
       description="View complete product information"
       actions={editButton}
     >
-      <ProductView slug={slug} currentUserRole={user.role} />
+      <ProductViewWrapper slug={slug} currentUserRole={user.role} />
     </AppLayout>
   )
 }
