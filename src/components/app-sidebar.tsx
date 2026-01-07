@@ -14,6 +14,7 @@ import {
   IconInnerShadowTop,
   IconListDetails,
   IconPackage,
+  IconPackages,
   IconReceipt,
   IconReport,
   IconSearch,
@@ -63,6 +64,11 @@ const data = {
       title: "Orders",
       url: "/orders",
       icon: IconReceipt,
+    },
+    {
+      title: "Inventory",
+      url: "/inventory",
+      icon: IconPackages,
     },
     {
       title: "Users",

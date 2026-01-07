@@ -1,27 +1,20 @@
 import { Suspense } from "react"
 import { getAuthenticatedUser } from "@/lib/auth"
-import { OrderForm } from "@/components/orders"
 import { AppLayout } from "@/components/app-layout"
 import { LoadingState } from "@/components/ui/loading-state"
+import { InventoryWrapper } from "./inventory-wrapper"
 
-export default async function NewOrderPage() {
+export default async function InventoryPage() {
   const user = await getAuthenticatedUser()
 
   return (
     <AppLayout
       user={user}
-      title="Create Order"
-      description="Create a new order"
+      title="Inventory Management"
+      description="Track stock levels, adjustments, and alerts"
     >
       <Suspense fallback={<LoadingState variant="centered" text="Loading..." />}>
-        <OrderForm 
-          currentUserRole={user.role} 
-          currentUser={{
-            id: user.id,
-            name: user.name,
-            email: user.email,
-          }}
-        />
+        <InventoryWrapper />
       </Suspense>
     </AppLayout>
   )

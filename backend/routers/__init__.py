@@ -7,6 +7,8 @@ from .upload import router as upload_router
 from .attributes import router as attributes_router
 from .products import router as products_router
 from .orders import router as orders_router
+from .analytics import router as analytics_router
+from .inventory import router as inventory_router
 
 __all__ = [
     "auth_router",
@@ -15,5 +17,7 @@ __all__ = [
     "attributes_router",
     "products_router",
     "orders_router",
+    "analytics_router",
+    "inventory_router",
 ]
 

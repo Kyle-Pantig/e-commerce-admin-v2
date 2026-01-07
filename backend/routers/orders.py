@@ -3,7 +3,8 @@ from typing import Optional
 from datetime import datetime
 import uuid
 
-from prisma import Prisma
+from prisma import Json
+from prisma_client import get_prisma_client
 from models.order_models import (
     OrderCreate,
     OrderUpdate,
@@ -20,15 +21,6 @@ from models.order_models import (
 from routers.auth import get_current_user, get_current_admin
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
-
-# Prisma client instance
-prisma = Prisma()
-
-
-async def get_prisma():
-    if not prisma.is_connected():
-        await prisma.connect()
-    return prisma
 
 
 def generate_order_number() -> str:
@@ -137,7 +129,7 @@ async def create_order(
     current_user = Depends(get_current_user)
 ):
     """Create a new order (Admin can create manual orders for testing)"""
-    await get_prisma()
+    prisma = await get_prisma_client()
     
     # Calculate subtotal from items
     subtotal = sum(item.unit_price * item.quantity for item in order_data.items)
@@ -154,6 +146,7 @@ async def create_order(
         order = await tx.order.create(
             data={
                 "orderNumber": order_number,
+                "userId": order_data.user_id,  # Link to authenticated user
                 "status": "PENDING",
                 "paymentStatus": "PENDING",
                 "paymentMethod": order_data.payment_method.value if order_data.payment_method else None,
@@ -185,23 +178,88 @@ async def create_order(
         for item in order_data.items:
             item_data = {
                 "orderId": order.id,
-                "productId": item.product_id,
                 "productName": item.product_name,
-                "productSku": item.product_sku,
-                "productImage": item.product_image,
-                "variantId": item.variant_id,
-                "variantName": item.variant_name,
                 "unitPrice": item.unit_price,
                 "quantity": item.quantity,
                 "subtotal": item.unit_price * item.quantity,
             }
-            # Only include variantOptions if it has a value
+            # Only include optional fields if they have values
+            if item.product_id:
+                item_data["productId"] = item.product_id
+            if item.product_sku:
+                item_data["productSku"] = item.product_sku
+            if item.product_image:
+                item_data["productImage"] = item.product_image
+            if item.variant_id:
+                item_data["variantId"] = item.variant_id
+            if item.variant_name:
+                item_data["variantName"] = item.variant_name
             if item.variant_options:
-                item_data["variantOptions"] = item.variant_options
+                item_data["variantOptions"] = Json(dict(item.variant_options))  # Wrap with Json() for Prisma
             items_data.append(item_data)
             
         if items_data:
             await tx.orderitem.create_many(data=items_data)
+        
+        # Reduce stock for each product/variant in the order and record adjustments
+        for item in order_data.items:
+            if item.variant_id:
+                # Get current variant stock with product info
+                variant = await tx.productvariant.find_unique(
+                    where={"id": item.variant_id},
+                    include={"product": True}
+                )
+                if variant:
+                    previous_stock = variant.stock
+                    new_stock = previous_stock - item.quantity
+                    
+                    # Reduce variant stock
+                    await tx.productvariant.update(
+                        where={"id": item.variant_id},
+                        data={"stock": new_stock}
+                    )
+                    
+                    # Record stock adjustment with names
+                    await tx.stockadjustment.create(
+                        data={
+                            "productId": item.product_id,
+                            "variantId": item.variant_id,
+                            "productName": variant.product.name if variant.product else None,
+                            "variantName": variant.name,
+                            "type": "SALE",
+                            "quantity": -item.quantity,
+                            "previousStock": previous_stock,
+                            "newStock": new_stock,
+                            "orderId": order.id,
+                            "reason": f"Order {order_number}",
+                        }
+                    )
+            elif item.product_id:
+                # Get current product stock
+                product_item = await tx.product.find_unique(where={"id": item.product_id})
+                if product_item:
+                    previous_stock = product_item.stock
+                    new_stock = previous_stock - item.quantity
+                    
+                    # Reduce product stock
+                    await tx.product.update(
+                        where={"id": item.product_id},
+                        data={"stock": new_stock}
+                    )
+                    
+                    # Record stock adjustment with name
+                    await tx.stockadjustment.create(
+                        data={
+                            "productId": item.product_id,
+                            "productName": product_item.name,
+                            "type": "SALE",
+                            "quantity": -item.quantity,
+                            "previousStock": previous_stock,
+                            "newStock": new_stock,
+                            "orderId": order.id,
+                            "reason": f"Order {order_number}",
+                        }
+                    )
         
         # Create initial status history
         await tx.orderstatushistory.create(
@@ -240,7 +298,7 @@ async def list_orders(
     current_user = Depends(get_current_user)
 ):
     """List orders with filtering and pagination"""
-    await get_prisma()
+    prisma = await get_prisma_client()
     
     # Build where clause
     where = {}
@@ -307,7 +365,7 @@ async def get_order(
     current_user = Depends(get_current_user)
 ):
     """Get order by ID"""
-    await get_prisma()
+    prisma = await get_prisma_client()
     
     order = await prisma.order.find_unique(
         where={"id": order_id},
@@ -332,7 +390,7 @@ async def get_order_by_number(
     current_user = Depends(get_current_user)
 ):
     """Get order by order number"""
-    await get_prisma()
+    prisma = await get_prisma_client()
     
     order = await prisma.order.find_unique(
         where={"orderNumber": order_number},
@@ -358,7 +416,7 @@ async def update_order(
     current_admin = Depends(get_current_admin)
 ):
     """Update order details (Admin only)"""
-    await get_prisma()
+    prisma = await get_prisma_client()
     
     # Check if order exists
     existing_order = await prisma.order.find_unique(where={"id": order_id})
@@ -450,7 +508,7 @@ async def update_order_status(
     current_admin = Depends(get_current_admin)
 ):
     """Update order status (Admin only)"""
-    await get_prisma()
+    prisma = await get_prisma_client()
     
     # Check if order exists
     existing_order = await prisma.order.find_unique(where={"id": order_id})
@@ -490,6 +548,113 @@ async def update_order_status(
                 "changedBy": current_admin.email if hasattr(current_admin, 'email') else str(current_admin.id),
             }
         )
+        
+        # Restore stock if order is cancelled (and wasn't already cancelled)
+        if new_status == "CANCELLED" and old_status != "CANCELLED":
+            # Get order items to restore stock
+            order_items = await tx.orderitem.find_many(where={"orderId": order_id})
+            for item in order_items:
+                if item.variantId:
+                    variant = await tx.productvariant.find_unique(
+                        where={"id": item.variantId},
+                        include={"product": True}
+                    )
+                    if variant:
+                        previous_stock = variant.stock
+                        new_stock = previous_stock + item.quantity
+                        await tx.productvariant.update(
+                            where={"id": item.variantId},
+                            data={"stock": new_stock}
+                        )
+                        # Record stock adjustment with names
+                        await tx.stockadjustment.create(
+                            data={
+                                "productId": item.productId,
+                                "variantId": item.variantId,
+                                "productName": variant.product.name if variant.product else None,
+                                "variantName": variant.name,
+                                "type": "RETURN",
+                                "quantity": item.quantity,
+                                "previousStock": previous_stock,
+                                "newStock": new_stock,
+                                "orderId": order_id,
+                                "reason": f"Order {existing_order.orderNumber} cancelled",
+                            }
+                        )
+                elif item.productId:
+                    product_item = await tx.product.find_unique(where={"id": item.productId})
+                    if product_item:
+                        previous_stock = product_item.stock
+                        new_stock = previous_stock + item.quantity
+                        await tx.product.update(
+                            where={"id": item.productId},
+                            data={"stock": new_stock}
+                        )
+                        # Record stock adjustment with name
+                        await tx.stockadjustment.create(
+                            data={
+                                "productId": item.productId,
+                                "productName": product_item.name,
+                                "type": "RETURN",
+                                "quantity": item.quantity,
+                                "previousStock": previous_stock,
+                                "newStock": new_stock,
+                                "orderId": order_id,
+                                "reason": f"Order {existing_order.orderNumber} cancelled",
+                            }
+                        )
+        
+        # Reduce stock again if order is un-cancelled (restored from cancelled)
+        if old_status == "CANCELLED" and new_status != "CANCELLED":
+            order_items = await tx.orderitem.find_many(where={"orderId": order_id})
+            for item in order_items:
+                if item.variantId:
+                    variant = await tx.productvariant.find_unique(
+                        where={"id": item.variantId},
+                        include={"product": True}
+                    )
+                    if variant:
+                        previous_stock = variant.stock
+                        new_stock = previous_stock - item.quantity
+                        await tx.productvariant.update(
+                            where={"id": item.variantId},
+                            data={"stock": new_stock}
+                        )
+                        await tx.stockadjustment.create(
+                            data={
+                                "productId": item.productId,
+                                "variantId": item.variantId,
+                                "productName": variant.product.name if variant.product else None,
+                                "variantName": variant.name,
+                                "type": "SALE",
+                                "quantity": -item.quantity,
+                                "previousStock": previous_stock,
+                                "newStock": new_stock,
+                                "orderId": order_id,
+                                "reason": f"Order {existing_order.orderNumber} restored",
+                            }
+                        )
+                elif item.productId:
+                    product_item = await tx.product.find_unique(where={"id": item.productId})
+                    if product_item:
+                        previous_stock = product_item.stock
+                        new_stock = previous_stock - item.quantity
+                        await tx.product.update(
+                            where={"id": item.productId},
+                            data={"stock": new_stock}
+                        )
+                        await tx.stockadjustment.create(
+                            data={
+                                "productId": item.productId,
+                                "productName": product_item.name,
+                                "type": "SALE",
+                                "quantity": -item.quantity,
+                                "previousStock": previous_stock,
+                                "newStock": new_stock,
+                                "orderId": order_id,
+                                "reason": f"Order {existing_order.orderNumber} restored",
+                            }
+                        )
     
     # Fetch updated order
     updated_order = await prisma.order.find_unique(
@@ -512,7 +677,7 @@ async def delete_order(
     Optimized with explicit parallel deletes for safety."""
     import asyncio
     
-    await get_prisma()
+    prisma = await get_prisma_client()
     
     existing_order = await prisma.order.find_unique(where={"id": order_id})
     if not existing_order:
@@ -544,7 +709,7 @@ async def get_order_stats(
     """Get order statistics summary - optimized with parallel queries"""
     import asyncio
     
-    await get_prisma()
+    prisma = await get_prisma_client()
     
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     

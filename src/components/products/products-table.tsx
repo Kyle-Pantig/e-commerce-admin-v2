@@ -64,8 +64,12 @@ import {
   IconPackage,
   IconSearch,
   IconX,
+  IconLoader2,
 } from "@tabler/icons-react"
 import Image from "next/image"
+import { cn } from "@/lib/utils"
+import { useSidebar } from "@/components/ui/sidebar"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 // Import shared API services and types
 import { productsApi, type ProductListResponse } from "@/lib/api/services/products"
@@ -82,6 +86,8 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
   const searchParams = useSearchParams()
   const queryClient = useQueryClient()
   const [isPending, startTransition] = useTransition()
+  const { state: sidebarState } = useSidebar()
+  const isMobile = useIsMobile()
   
   // UI State
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -91,6 +97,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false)
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false)
   const [bulkStatus, setBulkStatus] = useState<ProductStatus>("ACTIVE")
+  const [duplicatingProductId, setDuplicatingProductId] = useState<string | null>(null)
   
   // Filter State - Initialize from URL params
   const [page, setPage] = useState(() => {
@@ -320,16 +327,19 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
       return productsApi.create(duplicateData)
     },
     onSuccess: (newProduct) => {
+      setDuplicatingProductId(null)
       toast.success("Product duplicated successfully")
       queryClient.invalidateQueries({ queryKey: ["products"] })
       router.push(`/products/${newProduct.slug}/edit`)
     },
     onError: (error: Error) => {
+      setDuplicatingProductId(null)
       toast.error(error.message || "Failed to duplicate product")
     },
   })
 
   const handleDuplicate = (product: ProductListItem) => {
+    setDuplicatingProductId(product.id)
     duplicateMutation.mutate(product.id)
   }
 
@@ -658,6 +668,16 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
             cell: ({ row }: { row: { original: ProductListItem } }) => {
               const product = row.original
               const isActionLoading = deleteMutation.isPending
+              const isDuplicating = duplicatingProductId === product.id
+
+              // Show spinner when duplicating this specific product
+              if (isDuplicating) {
+                return (
+                  <Button variant="ghost" size="icon" disabled>
+                    <IconLoader2 className="h-4 w-4 animate-spin" />
+                  </Button>
+                )
+              }
 
               return (
                 <DropdownMenu>
@@ -680,7 +700,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
                       disabled={duplicateMutation.isPending}
                     >
                       <IconPlus className="mr-2 h-4 w-4" />
-                      {duplicateMutation.isPending ? "Duplicating..." : "Duplicate"}
+                      Duplicate
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
@@ -697,7 +717,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
           },
         ]
       : []),
-  ], [isAdmin, deleteMutation.isPending])
+  ], [isAdmin, deleteMutation.isPending, duplicatingProductId, selectedProductIds, productsData?.items])
 
   // Initialize table
   const table = useReactTable({
@@ -764,114 +784,71 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
 
   return (
     <div className="px-4 lg:px-6 space-y-4">
-      {/* Bulk Actions Toolbar */}
-      {selectedProductIds.size > 0 && (
-        <div className="flex items-center justify-between p-4 bg-primary/5 border border-primary/20 rounded-lg">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">
-              {selectedProductIds.size} product{selectedProductIds.size !== 1 ? "s" : ""} selected
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Select value={bulkStatus} onValueChange={(v) => setBulkStatus(v as ProductStatus)}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
+
+      {/* Filters */}
+      <div className="flex flex-col gap-4">
+        {/* Search Row */}
+        <div className="relative flex-1 flex">
+          <Input
+            placeholder="Search products..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+            className="rounded-r-none border-r-0 pr-8 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-border focus:outline-none shadow-none"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              onClick={handleClearSearch}
+              className="absolute right-12 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors z-10"
+              aria-label="Clear search"
+            >
+              <IconX className="h-4 w-4" />
+            </button>
+          )}
+          <Button variant="outline" onClick={handleSearch} className="rounded-l-none border-l cursor-pointer hover:bg-transparent! shadow-none">
+            <IconSearch className="h-4 w-4" />
+          </Button>
+        </div>
+        
+        {/* Filters Row */}
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
+          <div className="grid grid-cols-2 sm:flex gap-2 sm:gap-4">
+            <Select value={categorySlug || "all"} onValueChange={handleCategoryFilterChange}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {flatCategories.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.slug}>
+                    {"  ".repeat(cat.level)}{cat.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            <Select value={statusFilter || "all"} onValueChange={handleStatusFilterChange}>
+              <SelectTrigger className="w-full sm:w-[140px]">
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="ACTIVE">Active</SelectItem>
                 <SelectItem value="DRAFT">Draft</SelectItem>
                 <SelectItem value="DISABLED">Disabled</SelectItem>
                 <SelectItem value="ARCHIVED">Archived</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setBulkStatusDialogOpen(true)}
-              disabled={bulkStatusMutation.isPending}
-            >
-              Update Status
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setBulkDeleteDialogOpen(true)}
-              disabled={bulkDeleteMutation.isPending}
-            >
-              <IconTrash className="h-4 w-4 mr-2" />
-              Delete
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelectedProductIds(new Set())}
-            >
-              Clear
-            </Button>
           </div>
+          
+          {isAdmin && (
+            <Button onClick={() => router.push("/products/new")} className="w-full sm:w-auto sm:ml-auto">
+              <IconPlus className="mr-2 h-4 w-4" />
+              Create Product
+            </Button>
+          )}
         </div>
-      )}
-
-      {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-4">
-        <div className="flex-1 flex gap-2">
-          <div className="relative max-w-sm">
-            <Input
-              placeholder="Search products..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              className="pr-8"
-            />
-            {searchInput && (
-              <button
-                type="button"
-                onClick={handleClearSearch}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Clear search"
-              >
-                <IconX className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <Button variant="outline" onClick={handleSearch}>
-            <IconSearch className="h-4 w-4" />
-          </Button>
-        </div>
-        
-        <Select value={categorySlug || "all"} onValueChange={handleCategoryFilterChange}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="All Categories" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {flatCategories.map((cat) => (
-              <SelectItem key={cat.id} value={cat.slug}>
-                {"  ".repeat(cat.level)}{cat.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        
-        <Select value={statusFilter || "all"} onValueChange={handleStatusFilterChange}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="All Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="ACTIVE">Active</SelectItem>
-            <SelectItem value="DRAFT">Draft</SelectItem>
-            <SelectItem value="DISABLED">Disabled</SelectItem>
-            <SelectItem value="ARCHIVED">Archived</SelectItem>
-          </SelectContent>
-        </Select>
-        
-        {isAdmin && (
-          <Button onClick={() => router.push("/products/new")}>
-            <IconPlus className="mr-2 h-4 w-4" />
-            Create Product
-          </Button>
-        )}
       </div>
 
       {/* Table */}
@@ -983,30 +960,73 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
       </Dialog>
 
       {/* Bulk Delete Dialog */}
-      <Dialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Products</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete {selectedProductIds.size} product{selectedProductIds.size !== 1 ? "s" : ""}? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBulkDeleteDialogOpen(false)}>
-              Cancel
+      <DeleteConfirmDialog
+        open={bulkDeleteDialogOpen}
+        onOpenChange={setBulkDeleteDialogOpen}
+        title="Delete Products"
+        description={`Are you sure you want to delete ${selectedProductIds.size} product${selectedProductIds.size !== 1 ? "s" : ""}? This action cannot be undone.`}
+        onConfirm={() => bulkDeleteMutation.mutate(Array.from(selectedProductIds))}
+        isDeleting={bulkDeleteMutation.isPending}
+      />
+
+      {/* Floating Bulk Actions Bar */}
+      <div className={cn(
+        "fixed bottom-6 z-50 transition-all duration-300 ease-in-out px-4 flex justify-center pointer-events-none",
+        isMobile ? "w-full left-0" : sidebarState === "expanded" ? "w-[calc(100%-18rem)] left-72" : "w-[calc(100%-3rem)] left-12"
+      )}>
+        <div className={cn(
+          "bg-background/95 backdrop-blur-md border shadow-2xl rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-center gap-3 sm:gap-6 pointer-events-auto transition-all transform duration-500",
+          selectedProductIds.size > 0 ? "translate-y-0 opacity-100 scale-100" : "translate-y-20 opacity-0 scale-95 pointer-events-none"
+        )}>
+          <div className="flex items-center gap-3 sm:pr-6 sm:border-r">
+            <div className="flex items-center justify-center h-8 w-8 rounded-full bg-primary text-primary-foreground text-sm font-bold">
+              {selectedProductIds.size}
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold">
+                Product{selectedProductIds.size !== 1 ? "s" : ""} Selected
+              </span>
+              <span className="text-xs text-muted-foreground hidden sm:block">Choose an action below</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBulkStatusDialogOpen(true)}
+              disabled={bulkStatusMutation.isPending}
+              className="h-9 whitespace-nowrap"
+            >
+              <IconEdit className="h-4 w-4 mr-2" />
+              Update Status
             </Button>
             <Button
-              variant="destructive"
-              onClick={() => {
-                bulkDeleteMutation.mutate(Array.from(selectedProductIds))
-              }}
+              variant="outline"
+              size="sm"
+              onClick={() => setBulkDeleteDialogOpen(true)}
               disabled={bulkDeleteMutation.isPending}
+              className="h-9 text-destructive hover:text-destructive hover:bg-destructive/10"
             >
-              {bulkDeleteMutation.isPending ? "Deleting..." : "Delete"}
+              <IconTrash className="h-4 w-4 mr-2" />
+              Delete
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (selectedProductIds.size === productsData?.items.length) {
+                  setSelectedProductIds(new Set())
+                } else {
+                  setSelectedProductIds(new Set(productsData?.items.map(p => p.id) || []))
+                }
+              }}
+              className="h-9 text-muted-foreground hover:text-foreground"
+            >
+              {selectedProductIds.size === productsData?.items.length ? "Deselect All" : "Select All"}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -465,6 +465,8 @@ export interface OrderItemCreate {
 }
 
 export interface OrderCreate {
+  user_id?: string | null  // Link order to authenticated user
+  
   customer_name: string
   customer_email: string
   customer_phone?: string | null

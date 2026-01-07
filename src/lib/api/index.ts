@@ -47,6 +47,23 @@ export { usersApi, authApi } from "./services/users"
 export { ordersApi } from "./services/orders"
 export type { OrderListResponse } from "./services/orders"
 
+export { inventoryApi } from "./services/inventory"
+export type {
+  StockAdjustmentType,
+  StockAdjustment,
+  StockAdjustmentCreate,
+  BulkStockAdjustmentItem,
+  BulkStockAdjustmentCreate,
+  StockHistoryResponse,
+  BulkStockAdjustmentResponse,
+  StockSummary,
+  ProductStockReport,
+  StockMovementReport,
+  LowStockAlert,
+  LowStockAlertsResponse,
+  QuickUpdateResponse,
+} from "./services/inventory"
+
 // =============================================================================
 // Types - Re-export all types for convenience
 // =============================================================================

@@ -89,6 +89,9 @@ class OrderStatusHistoryResponse(BaseModel):
 # ==========================================
 
 class OrderCreate(BaseModel):
+    # User reference (optional - for authenticated users)
+    user_id: Optional[str] = None
+    
     # Customer info
     customer_name: str = Field(..., min_length=1, max_length=255)
     customer_email: EmailStr

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -41,8 +41,15 @@ import { ordersApi } from "@/lib/api/services/orders"
 import { productsApi } from "@/lib/api/services/products"
 import type { OrderCreate, PaymentMethod, Product, ProductVariant } from "@/lib/api/types"
 
+interface CurrentUser {
+  id: string
+  name: string
+  email: string
+}
+
 interface OrderFormProps {
   currentUserRole?: string
+  currentUser?: CurrentUser
 }
 
 const orderItemSchema = z.object({
@@ -98,7 +105,7 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
   { value: "OTHER", label: "Other" },
 ]
 
-export function OrderForm({ currentUserRole }: OrderFormProps) {
+export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
   const router = useRouter()
   const queryClient = useQueryClient()
   const [selectedProductId, setSelectedProductId] = useState<string>("")
@@ -120,8 +127,8 @@ export function OrderForm({ currentUserRole }: OrderFormProps) {
   const form = useForm({
     resolver: zodResolver(orderFormSchema),
     defaultValues: {
-      customer_name: "",
-      customer_email: "",
+      customer_name: currentUser?.name || "",
+      customer_email: currentUser?.email || "",
       customer_phone: "",
       shipping_address: "",
       shipping_city: "",
@@ -149,20 +156,18 @@ export function OrderForm({ currentUserRole }: OrderFormProps) {
     name: "items",
   })
 
-  const watchItems = form.watch("items")
   const watchSameAsShipping = form.watch("same_as_shipping")
-  const watchShippingCost = form.watch("shipping_cost")
-  const watchTaxAmount = form.watch("tax_amount")
-  const watchDiscountAmount = form.watch("discount_amount")
+  
+  // Watch all form values to ensure reactivity when items change
+  const formValues = form.watch()
+  const watchItems = formValues.items || []
+  const watchShippingCost = formValues.shipping_cost
+  const watchTaxAmount = formValues.tax_amount
+  const watchDiscountAmount = formValues.discount_amount
 
-  // Calculate totals
-  const subtotal = useMemo(() => {
-    return watchItems.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0)
-  }, [watchItems])
-
-  const total = useMemo(() => {
-    return subtotal + (watchShippingCost || 0) + (watchTaxAmount || 0) - (watchDiscountAmount || 0)
-  }, [subtotal, watchShippingCost, watchTaxAmount, watchDiscountAmount])
+  // Calculate totals - recalculates whenever any form value changes
+  const subtotal = watchItems.reduce((sum, item) => sum + ((item?.unit_price || 0) * (item?.quantity || 0)), 0)
+  const total = subtotal + (watchShippingCost || 0) + (watchTaxAmount || 0) - (watchDiscountAmount || 0)
 
   // Create order mutation
   const createMutation = useMutation({
@@ -179,6 +184,7 @@ export function OrderForm({ currentUserRole }: OrderFormProps) {
 
   const onSubmit = (values: OrderFormValues) => {
     const orderData: OrderCreate = {
+      user_id: currentUser?.id,  // Link order to authenticated user
       customer_name: values.customer_name,
       customer_email: values.customer_email,
       customer_phone: values.customer_phone || undefined,

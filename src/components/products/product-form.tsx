@@ -82,6 +82,7 @@ import {
   IconBox,
   IconTags,
   IconCrop,
+  IconWand,
 } from "@tabler/icons-react"
 
 import { productSchema, type ProductFormData } from "@/lib/validations/product"
@@ -361,6 +362,35 @@ export function ProductForm({
   // State for new variant options
   const [newOptionKey, setNewOptionKey] = useState("")
   const [newOptionValue, setNewOptionValue] = useState("")
+
+  // State for variant generation
+  const [variantOptions, setVariantOptions] = useState<Record<string, string[]>>(() => {
+    // Initialize from existing variants if any
+    if (product?.variants && product.variants.length > 0) {
+      const options: Record<string, Set<string>> = {}
+      product.variants.forEach(v => {
+        if (v.options) {
+          Object.entries(v.options as Record<string, string>).forEach(([key, value]) => {
+            if (!options[key]) options[key] = new Set()
+            options[key].add(value)
+          })
+        }
+      })
+      const result: Record<string, string[]> = {}
+      Object.entries(options).forEach(([key, values]) => {
+        result[key] = Array.from(values)
+      })
+      return result
+    }
+    return {}
+  })
+  const [newOptionTypeName, setNewOptionTypeName] = useState("")
+  const [newOptionTypeValue, setNewOptionTypeValue] = useState("")
+  const [selectedVariantIds, setSelectedVariantIds] = useState<Set<number>>(new Set())
+  const [bulkEditOpen, setBulkEditOpen] = useState(false)
+  const [bulkEditField, setBulkEditField] = useState<"price" | "sale_price" | "stock" | "status">("price")
+  const [bulkEditValue, setBulkEditValue] = useState("")
+  const [stockAdjustMode, setStockAdjustMode] = useState<"add" | "subtract">("add")
 
   // DnD sensors
   const sensors = useSensors(
@@ -973,6 +1003,159 @@ export function ProductForm({
     setEditingVariant({ ...editingVariant, options: newOptions })
   }
 
+  // Variant Generation Functions
+  const addOptionType = () => {
+    if (!newOptionTypeName.trim()) return
+    const name = newOptionTypeName.trim()
+    if (variantOptions[name]) return // Already exists
+    setVariantOptions(prev => ({ ...prev, [name]: [] }))
+    setNewOptionTypeName("")
+  }
+
+  const removeOptionType = (typeName: string) => {
+    setVariantOptions(prev => {
+      const newOptions = { ...prev }
+      delete newOptions[typeName]
+      return newOptions
+    })
+  }
+
+  const addOptionValue = (typeName: string) => {
+    if (!newOptionTypeValue.trim()) return
+    const value = newOptionTypeValue.trim()
+    if (variantOptions[typeName]?.includes(value)) return // Already exists
+    setVariantOptions(prev => ({
+      ...prev,
+      [typeName]: [...(prev[typeName] || []), value]
+    }))
+    setNewOptionTypeValue("")
+  }
+
+  const removeOptionValue = (typeName: string, value: string) => {
+    setVariantOptions(prev => ({
+      ...prev,
+      [typeName]: prev[typeName]?.filter(v => v !== value) || []
+    }))
+  }
+
+  const generateVariants = () => {
+    const optionTypes = Object.keys(variantOptions).filter(k => variantOptions[k].length > 0)
+    if (optionTypes.length === 0) {
+      toast.error("Please add at least one option type with values")
+      return
+    }
+
+    // Generate all combinations
+    const generateCombinations = (types: string[], index: number, current: Record<string, string>): Record<string, string>[] => {
+      if (index === types.length) return [current]
+      
+      const typeName = types[index]
+      const values = variantOptions[typeName]
+      const results: Record<string, string>[] = []
+      
+      for (const value of values) {
+        const newCurrent = { ...current, [typeName]: value }
+        results.push(...generateCombinations(types, index + 1, newCurrent))
+      }
+      
+      return results
+    }
+
+    const combinations = generateCombinations(optionTypes, 0, {})
+    const basePrice = form.getValues("base_price") || 0
+    const baseSku = form.getValues("sku") || ""
+
+    // Create variants from combinations
+    const newVariants: LocalVariant[] = combinations.map((options, idx) => {
+      // Generate name from options (e.g., "Red - Large")
+      const name = Object.values(options).join(" - ")
+      // Generate SKU suffix from options
+      const skuSuffix = Object.values(options).map(v => v.substring(0, 3).toUpperCase()).join("-")
+      
+      // Check if variant already exists
+      const existingVariant = variants.find(v => {
+        const vOptions = v.options || {}
+        return Object.keys(options).every(k => vOptions[k] === options[k]) &&
+               Object.keys(vOptions).every(k => options[k] === vOptions[k])
+      })
+
+      if (existingVariant) return existingVariant
+
+      return {
+        name,
+        sku: baseSku ? `${baseSku}-${skuSuffix}` : skuSuffix,
+        price: basePrice,
+        stock: 0,
+        is_active: true,
+        options
+      }
+    })
+
+    setVariants(newVariants)
+    toast.success(`Generated ${newVariants.length} variant${newVariants.length !== 1 ? "s" : ""}`)
+  }
+
+  // Bulk Variant Operations
+  const toggleVariantSelection = (index: number) => {
+    setSelectedVariantIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(index)) {
+        newSet.delete(index)
+      } else {
+        newSet.add(index)
+      }
+      return newSet
+    })
+  }
+
+  const selectAllVariants = () => {
+    if (selectedVariantIds.size === variants.length) {
+      setSelectedVariantIds(new Set())
+    } else {
+      setSelectedVariantIds(new Set(variants.map((_, i) => i)))
+    }
+  }
+
+  const applyBulkEdit = () => {
+    if (selectedVariantIds.size === 0) return
+
+    setVariants(prev => prev.map((v, idx) => {
+      if (!selectedVariantIds.has(idx)) return v
+
+      switch (bulkEditField) {
+        case "price":
+          return { ...v, price: parseFloat(bulkEditValue) || v.price }
+        case "sale_price":
+          // Allow clearing sale price with 0 or empty
+          const salePrice = parseFloat(bulkEditValue)
+          return { ...v, sale_price: salePrice > 0 ? salePrice : undefined }
+        case "stock":
+          // Add or subtract based on mode
+          const amount = Math.abs(parseInt(bulkEditValue) || 0)
+          const adjustment = stockAdjustMode === "add" ? amount : -amount
+          const newStock = Math.max(0, v.stock + adjustment)
+          return { ...v, stock: newStock }
+        case "status":
+          return { ...v, is_active: bulkEditValue === "active" }
+        default:
+          return v
+      }
+    }))
+
+    const action = bulkEditField === "stock" ? 
+      (stockAdjustMode === "add" ? "Added stock to" : "Removed stock from") : "Updated"
+    toast.success(`${action} ${selectedVariantIds.size} variant${selectedVariantIds.size !== 1 ? "s" : ""}`)
+    setSelectedVariantIds(new Set())
+    setBulkEditOpen(false)
+    setBulkEditValue("")
+  }
+
+  const deleteSelectedVariants = () => {
+    setVariants(prev => prev.filter((_, idx) => !selectedVariantIds.has(idx)))
+    toast.success(`Deleted ${selectedVariantIds.size} variant${selectedVariantIds.size !== 1 ? "s" : ""}`)
+    setSelectedVariantIds(new Set())
+  }
+
   const hasEditingVariantChanges = useMemo(() => {
     if (!editingVariant) return false
     if (isAddingVariant) return true
@@ -1176,6 +1359,186 @@ export function ProductForm({
 
                 {form.watch("has_variants") && (
                   <div className="space-y-6">
+                    {/* Variant Generator */}
+                    <Card className="border border-dashed border-primary/30 bg-primary/5">
+                      <CardHeader className="py-3 px-4">
+                        <CardTitle className="text-sm font-bold flex items-center gap-2">
+                          <IconWand className="h-4 w-4 text-primary" />
+                          Auto-Generate Variants
+                        </CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">Define option types (e.g., Size, Color) and their values to automatically generate all variant combinations.</p>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4 space-y-4">
+                        {/* Option Types List */}
+                        {Object.keys(variantOptions).length > 0 && (
+                          <div className="space-y-3">
+                            {Object.entries(variantOptions).map(([typeName, values]) => (
+                              <div key={typeName} className="p-3 bg-background rounded-lg border">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-sm font-semibold">{typeName}</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => removeOptionType(typeName)}>
+                                    <IconX className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5 mb-2">
+                                  {values.map(value => (
+                                    <Badge key={value} variant="secondary" className="pl-2 pr-1 py-0.5 text-xs">
+                                      {value}
+                                      <button onClick={() => removeOptionValue(typeName, value)} className="ml-1 hover:text-destructive">
+                                        <IconX className="h-3 w-3" />
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                </div>
+                                <div className="flex gap-2">
+                                  <Input
+                                    placeholder={`Add ${typeName} value...`}
+                                    className="h-8 text-sm flex-1"
+                                    value={newOptionTypeValue}
+                                    onChange={(e) => setNewOptionTypeValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault()
+                                        addOptionValue(typeName)
+                                      }
+                                    }}
+                                    onFocus={() => setNewOptionTypeValue("")}
+                                  />
+                                  <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => addOptionValue(typeName)}>
+                                    <IconPlus className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Add New Option Type */}
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="New option type (e.g., Size, Color)..."
+                            className="h-9 text-sm"
+                            value={newOptionTypeName}
+                            onChange={(e) => setNewOptionTypeName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault()
+                                addOptionType()
+                              }
+                            }}
+                          />
+                          <Button type="button" variant="outline" size="sm" className="h-9" onClick={addOptionType}>
+                            <IconPlus className="h-4 w-4 mr-1" />
+                            Add Type
+                          </Button>
+                        </div>
+
+                        {/* Generate Button */}
+                        {Object.keys(variantOptions).length > 0 && (
+                          <div className="flex items-center justify-between pt-2 border-t">
+                            <span className="text-xs text-muted-foreground">
+                              {Object.values(variantOptions).reduce((acc, vals) => acc * (vals.length || 1), 1)} possible combinations
+                            </span>
+                            <Button type="button" onClick={generateVariants} className="h-9">
+                              <IconWand className="h-4 w-4 mr-2" />
+                              Generate Variants
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {/* Bulk Actions Bar */}
+                    {selectedVariantIds.size > 0 && (
+                      <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">
+                            {selectedVariantIds.size} variant{selectedVariantIds.size !== 1 ? "s" : ""} selected
+                          </span>
+                          <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setSelectedVariantIds(new Set())}>
+                            Deselect All
+                          </Button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Select value={bulkEditField} onValueChange={(v) => setBulkEditField(v as typeof bulkEditField)}>
+                            <SelectTrigger size="sm" className="w-full sm:w-[110px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="price">Price</SelectItem>
+                              <SelectItem value="sale_price">Sale Price</SelectItem>
+                              <SelectItem value="stock">Stock</SelectItem>
+                              <SelectItem value="status">Status</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {bulkEditField === "status" ? (
+                            <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
+                              <SelectTrigger size="sm" className="w-full sm:w-[100px]">
+                                <SelectValue placeholder="Select..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="active">Active</SelectItem>
+                                <SelectItem value="inactive">Inactive</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : bulkEditField === "stock" ? (
+                            <div className="flex items-center h-8">
+                              <div className="flex h-full rounded-l-md border border-r-0 overflow-hidden">
+                                <button
+                                  type="button"
+                                  onClick={() => setStockAdjustMode("add")}
+                                  className={cn(
+                                    "h-full w-8 flex items-center justify-center text-sm font-bold transition-colors",
+                                    stockAdjustMode === "add" 
+                                      ? "bg-green-500 text-white" 
+                                      : "bg-muted hover:bg-muted/80 text-muted-foreground"
+                                  )}
+                                >
+                                  +
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setStockAdjustMode("subtract")}
+                                  className={cn(
+                                    "h-full w-8 flex items-center justify-center text-sm font-bold transition-colors border-l",
+                                    stockAdjustMode === "subtract" 
+                                      ? "bg-red-500 text-white" 
+                                      : "bg-muted hover:bg-muted/80 text-muted-foreground"
+                                  )}
+                                >
+                                  −
+                                </button>
+                              </div>
+                              <Input
+                                type="number"
+                                min="0"
+                                placeholder="0"
+                                className="w-[70px] sm:w-[80px] h-8 rounded-l-none border-l-0"
+                                value={bulkEditValue}
+                                onChange={(e) => setBulkEditValue(e.target.value)}
+                              />
+                            </div>
+                          ) : (
+                            <Input
+                              type="number"
+                              placeholder="0.00"
+                              className="w-full sm:w-[100px] h-8"
+                              value={bulkEditValue}
+                              onChange={(e) => setBulkEditValue(e.target.value)}
+                            />
+                          )}
+                          <div className="flex gap-2 w-full sm:w-auto">
+                            <Button type="button" size="sm" className="h-8 flex-1 sm:flex-initial" onClick={applyBulkEdit} disabled={!bulkEditValue}>
+                              Apply
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" className="h-8 text-destructive hover:text-destructive" onClick={deleteSelectedVariants}>
+                              <IconTrash className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Variant Form (Inline Card) */}
                     {(isAddingVariant || editingVariant) ? (
                       <Card className="border-2 border-primary/20 shadow-lg py-0">
@@ -1257,21 +1620,21 @@ export function ProductForm({
                               Variant Options (e.g. Color: Red)
                             </Label>
                             
-                            <div className="flex gap-3">
+                            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
                               <Input 
                                 placeholder="Option (e.g. Color)" 
                                 value={newOptionKey} 
                                 onChange={(e) => setNewOptionKey(e.target.value)} 
-                                className="h-9 text-sm" 
+                                className="h-9 text-sm flex-1" 
                               />
                               <Input 
                                 placeholder="Value (e.g. Red)" 
                                 value={newOptionValue} 
                                 onChange={(e) => setNewOptionValue(e.target.value)} 
                                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVariantOption(); } }}
-                                className="h-9 text-sm" 
+                                className="h-9 text-sm flex-1" 
                               />
-                              <Button type="button" variant="outline" size="sm" onClick={addVariantOption} className="h-9 px-3">
+                              <Button type="button" variant="outline" size="sm" onClick={addVariantOption} className="h-9 px-3 w-full sm:w-auto">
                                 <IconPlus className="h-4 w-4 mr-2" />
                                 Add
                               </Button>
@@ -1292,7 +1655,7 @@ export function ProductForm({
                             </div>
                           </div>
 
-                          <div className="flex items-center justify-between gap-3 pt-6 border-t">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-6 border-t">
                             <div className="flex items-center space-x-3 bg-primary/5 px-3 py-1.5 rounded-lg border border-primary/10">
                               <Label htmlFor="var-active-editing" className="text-[10px] font-bold uppercase tracking-widest text-primary cursor-pointer">Active Variant</Label>
                               <Checkbox 
@@ -1302,12 +1665,12 @@ export function ProductForm({
                               />
                             </div>
                             <div className="flex items-center gap-3">
-                              <Button type="button" variant="ghost" onClick={cancelVariantEdit}>Cancel</Button>
+                              <Button type="button" variant="ghost" onClick={cancelVariantEdit} className="flex-1 sm:flex-initial">Cancel</Button>
                               <Button 
                                 type="button"
                                 onClick={saveVariant}
                                 disabled={!editingVariant?.name || !hasEditingVariantChanges}
-                                className="shadow-lg shadow-primary/20"
+                                className="shadow-lg shadow-primary/20 flex-1 sm:flex-initial"
                               >
                                 <IconCheck className="h-4 w-4 mr-2" />
                                 {isAddingVariant ? "Add Variant" : "Update Variant"}
@@ -1323,6 +1686,12 @@ export function ProductForm({
                           <Table>
                             <TableHeader className="bg-muted/50">
                               <TableRow>
+                                <TableHead className="w-10">
+                                  <Checkbox 
+                                    checked={variants.length > 0 && selectedVariantIds.size === variants.length}
+                                    onCheckedChange={selectAllVariants}
+                                  />
+                                </TableHead>
                                 <TableHead className="text-[10px] font-bold uppercase tracking-widest">Variant Name</TableHead>
                                 <TableHead className="text-[10px] font-bold uppercase tracking-widest">SKU</TableHead>
                                 <TableHead className="text-[10px] font-bold uppercase tracking-widest">Price</TableHead>
@@ -1334,7 +1703,13 @@ export function ProductForm({
                             <TableBody>
                               {variants.length > 0 ? (
                                 variants.map((v, idx) => (
-                                  <TableRow key={idx} className="group hover:bg-muted/30">
+                                  <TableRow key={idx} className={cn("group hover:bg-muted/30", selectedVariantIds.has(idx) && "bg-primary/5")}>
+                                    <TableCell>
+                                      <Checkbox 
+                                        checked={selectedVariantIds.has(idx)}
+                                        onCheckedChange={() => toggleVariantSelection(idx)}
+                                      />
+                                    </TableCell>
                                     <TableCell>
                                       <div className="font-medium">{v.name}</div>
                                       {v.options && Object.keys(v.options).length > 0 && (
@@ -1386,8 +1761,8 @@ export function ProductForm({
                                 ))
                               ) : (
                                 <TableRow>
-                                  <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                                    No variants created yet.
+                                  <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                                    No variants created yet. Use the generator above or add manually.
                                   </TableCell>
                                 </TableRow>
                               )}
@@ -1396,14 +1771,36 @@ export function ProductForm({
                         </div>
 
                         {/* Mobile Card View */}
-                        <div className="grid grid-cols-1 gap-4 md:hidden">
+                        <div className="grid grid-cols-1 gap-3 md:hidden">
+                          {/* Mobile Select All */}
+                          {variants.length > 0 && (
+                            <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border">
+                              <div className="flex items-center gap-2">
+                                <Checkbox 
+                                  checked={variants.length > 0 && selectedVariantIds.size === variants.length}
+                                  onCheckedChange={selectAllVariants}
+                                />
+                                <span className="text-sm text-muted-foreground">Select All</span>
+                              </div>
+                              <span className="text-xs text-muted-foreground">{variants.length} variant{variants.length !== 1 ? "s" : ""}</span>
+                            </div>
+                          )}
                           {variants.length > 0 ? (
                             variants.map((v, idx) => (
-                              <Card key={idx} className="overflow-hidden">
-                                <div className="flex p-4 gap-4">
+                              <Card key={idx} className={cn("overflow-hidden", selectedVariantIds.has(idx) && "ring-2 ring-primary")}>
+                                <div className="flex p-3 gap-3">
+                                  <div className="flex items-start pt-0.5">
+                                    <Checkbox 
+                                      checked={selectedVariantIds.has(idx)}
+                                      onCheckedChange={() => toggleVariantSelection(idx)}
+                                    />
+                                  </div>
                                   <div className="flex-1 min-w-0">
-                                    <div className="flex items-start justify-between">
-                                      <h4 className="font-semibold truncate pr-2">{v.name}</h4>
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <h4 className="font-semibold text-sm truncate">{v.name}</h4>
+                                        <div className="text-[10px] text-muted-foreground font-mono">{v.sku || "NO SKU"}</div>
+                                      </div>
                                       <div className="flex gap-1 flex-shrink-0">
                                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditVariant(v, idx)}>
                                           <IconEdit className="h-3.5 w-3.5" />
@@ -1413,19 +1810,40 @@ export function ProductForm({
                                         </Button>
                                       </div>
                                     </div>
-                                    <div className="text-xs text-muted-foreground font-mono mt-0.5">{v.sku || "NO SKU"}</div>
-                                    <div className="flex flex-col mt-2">
-                                      <span className={cn("font-bold text-sm", v.sale_price && "text-xs text-muted-foreground line-through")}>
-                                        ${v.price.toFixed(2)}
-                                      </span>
-                                      {v.sale_price && (
-                                        <span className="font-bold text-sm text-red-600">
-                                          ${v.sale_price.toFixed(2)}
+                                    
+                                    {/* Options badges */}
+                                    {v.options && Object.keys(v.options).length > 0 && (
+                                      <div className="flex flex-wrap gap-1 mt-2">
+                                        {Object.entries(v.options).map(([k, val]) => (
+                                          <Badge key={k} variant="secondary" className="text-[10px] px-1.5 h-5 font-normal">
+                                            {k}: {val}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    )}
+                                    
+                                    {/* Price & Stock row */}
+                                    <div className="flex items-center justify-between mt-2 pt-2 border-t">
+                                      <div className="flex items-baseline gap-2">
+                                        <span className={cn("font-bold", v.sale_price && "text-xs text-muted-foreground line-through")}>
+                                          ${v.price.toFixed(2)}
                                         </span>
-                                      )}
-                                      <Badge variant={v.stock > 0 ? "outline" : "destructive"} className="text-[10px] h-4 font-normal mt-1 w-fit">
-                                        {v.stock} in stock
-                                      </Badge>
+                                        {v.sale_price && (
+                                          <span className="font-bold text-red-600">
+                                            ${v.sale_price.toFixed(2)}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant={v.stock > 0 ? "outline" : "destructive"} className="text-[10px] h-5 font-normal">
+                                          {v.stock} in stock
+                                        </Badge>
+                                        {v.is_active ? (
+                                          <Badge variant="default" className="bg-green-500/10 text-green-600 text-[10px] h-5">Active</Badge>
+                                        ) : (
+                                          <Badge variant="secondary" className="text-[10px] h-5">Inactive</Badge>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
@@ -1673,17 +2091,47 @@ export function ProductForm({
                   
                   <div className="space-y-6">
                     <Field data-invalid={form.formState.errors.stock ? true : undefined}>
-                      <FieldLabel htmlFor="stock" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Available Stock</FieldLabel>
-                      <FormControl>
-                        <Input id="stock" type="number" min="0" className="h-10" disabled={!form.watch("track_inventory")} {...form.register("stock", { valueAsNumber: true })} />
-                      </FormControl>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <FieldLabel htmlFor="stock" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0">Available Stock</FieldLabel>
+                        {variants.length > 0 && (
+                          <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                            Auto-calculated
+                          </Badge>
+                        )}
+                      </div>
+                      {variants.length > 0 ? (
+                        // Product has variants - show calculated stock (read-only)
+                        <div className="space-y-2">
+                          <Input 
+                            id="stock" 
+                            type="number" 
+                            className="h-10 bg-muted/50" 
+                            value={variants.reduce((sum, v) => sum + (v.stock || 0), 0)}
+                            disabled
+                            readOnly
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Total stock from {variants.length} variant{variants.length > 1 ? 's' : ''}. Edit individual variant stock in the Variants section.
+                          </p>
+                        </div>
+                      ) : (
+                        // No variants - allow manual stock input
+                        <FormControl>
+                          <Input id="stock" type="number" min="0" className="h-10" disabled={!form.watch("track_inventory")} {...form.register("stock", { valueAsNumber: true })} />
+                        </FormControl>
+                      )}
                       <FormMessage />
                     </Field>
                     <Field data-invalid={form.formState.errors.low_stock_threshold ? true : undefined}>
                       <FieldLabel htmlFor="low_stock_threshold" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Low Stock Alert</FieldLabel>
                       <FormControl>
-                        <Input id="low_stock_threshold" type="number" min="0" className="h-10" placeholder="Alert level" disabled={!form.watch("track_inventory")} {...form.register("low_stock_threshold", { valueAsNumber: true, setValueAs: (v) => v === "" ? undefined : parseInt(v) })} />
+                        <Input id="low_stock_threshold" type="number" min="0" className="h-10" placeholder="Alert level" disabled={!form.watch("track_inventory") || variants.length > 0} {...form.register("low_stock_threshold", { valueAsNumber: true, setValueAs: (v) => v === "" ? undefined : parseInt(v) })} />
                       </FormControl>
+                      {variants.length > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Low stock alerts are managed per variant.
+                        </p>
+                      )}
                     </Field>
                   </div>
                 </FieldGroup>
@@ -1756,13 +2204,31 @@ export function ProductForm({
                   <Field data-invalid={form.formState.errors.meta_title ? true : undefined}>
                     <FieldLabel htmlFor="meta_title" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta Title</FieldLabel>
                     <FormControl>
-                      <Input id="meta_title" placeholder="SEO optimized title" {...form.register("meta_title")} className="h-10" />
+                      <div className="relative">
+                        <Input id="meta_title" placeholder="SEO optimized title" {...form.register("meta_title")} className="h-10 pr-16" />
+                        <span className={cn(
+                          "absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono",
+                          (form.watch("meta_title")?.length || 0) > 60 ? "text-destructive" : 
+                          (form.watch("meta_title")?.length || 0) >= 50 ? "text-green-600" : "text-muted-foreground"
+                        )}>
+                          {form.watch("meta_title")?.length || 0}/60
+                        </span>
+                      </div>
                     </FormControl>
                   </Field>
                   <Field data-invalid={form.formState.errors.meta_description ? true : undefined}>
                     <FieldLabel htmlFor="meta_description" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Meta Description</FieldLabel>
                     <FormControl>
-                      <Textarea id="meta_description" placeholder="Snippet for search engines..." className="h-24 resize-none" {...form.register("meta_description")} />
+                      <div className="relative">
+                        <Textarea id="meta_description" placeholder="Snippet for search engines..." className="h-24 resize-none pr-16" {...form.register("meta_description")} />
+                        <span className={cn(
+                          "absolute right-3 bottom-3 text-[10px] font-mono",
+                          (form.watch("meta_description")?.length || 0) > 160 ? "text-destructive" : 
+                          (form.watch("meta_description")?.length || 0) >= 150 ? "text-green-600" : "text-muted-foreground"
+                        )}>
+                          {form.watch("meta_description")?.length || 0}/160
+                        </span>
+                      </div>
                     </FormControl>
                   </Field>
                   <div className="pt-4 mt-4 border-t border-muted-foreground/10 space-y-4">

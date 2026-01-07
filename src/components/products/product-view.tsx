@@ -108,18 +108,32 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
     })
   }, [product?.variants])
 
-  // Find matching variant based on selected options
+  // Check if all variant options have been selected
+  const allOptionsSelected = useMemo(() => {
+    const requiredOptionKeys = Object.keys(variantOptions)
+    if (requiredOptionKeys.length === 0) return true
+    
+    return requiredOptionKeys.every(key => selectedOptions[key] !== undefined)
+  }, [variantOptions, selectedOptions])
+
+  // Find matching variant based on selected options (only if ALL options are selected)
   const matchingVariant = useMemo(() => {
-    if (!product?.variants || Object.keys(selectedOptions).length === 0) return null
+    if (!product?.variants || !allOptionsSelected || Object.keys(selectedOptions).length === 0) return null
     
     return product.variants.find(variant => {
       if (!variant.options || !variant.is_active) return false
+      
+      // Check exact match - all selected options must match AND variant must have same number of options
+      const variantOptionKeys = Object.keys(variant.options || {})
+      const selectedOptionKeys = Object.keys(selectedOptions)
+      
+      if (variantOptionKeys.length !== selectedOptionKeys.length) return false
       
       return Object.entries(selectedOptions).every(([key, value]) => {
         return variant.options?.[key] === value
       })
     }) || null
-  }, [product?.variants, selectedOptions])
+  }, [product?.variants, selectedOptions, allOptionsSelected])
 
   // Get current price and stock
   const currentPrice = useMemo(() => {
@@ -461,14 +475,16 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
             <Button
               size="lg"
               className="flex-1 h-14 text-lg"
-              disabled={currentStock === 0 || (product.has_variants && !matchingVariant)}
+              disabled={currentStock === 0 || (product.has_variants && (!allOptionsSelected || !matchingVariant))}
             >
               <IconShoppingCart className="mr-2 h-5 w-5" />
-              {product.has_variants && !matchingVariant
+              {product.has_variants && !allOptionsSelected
                 ? "Select Options"
-                : currentStock === 0
-                  ? "Out of Stock"
-                  : "Add to Cart"}
+                : product.has_variants && !matchingVariant
+                  ? "Unavailable"
+                  : currentStock === 0
+                    ? "Out of Stock"
+                    : "Add to Cart"}
             </Button>
             <Button variant="outline" size="lg" className="h-14 w-14">
               <IconHeart className="h-5 w-5" />

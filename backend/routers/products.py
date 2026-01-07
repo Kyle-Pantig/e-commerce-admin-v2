@@ -480,8 +480,11 @@ async def update_product(
     try:
         prisma = await get_prisma_client()
         
-        # Check product exists
-        existing = await prisma.product.find_unique(where={"id": product_id})
+        # Check product exists and get current data including variants
+        existing = await prisma.product.find_unique(
+            where={"id": product_id},
+            include={"variants": True}
+        )
         if not existing:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -540,6 +543,29 @@ async def update_product(
                     )
             update_data["categoryId"] = product_data.category_id
         
+        # Track stock changes for adjustments
+        stock_adjustments = []
+        adjusted_by = current_admin.email if hasattr(current_admin, 'email') else current_admin.id
+        
+        # Check if product stock changed (for non-variant products)
+        if product_data.stock is not None and product_data.stock != existing.stock:
+            change = product_data.stock - existing.stock
+            stock_adjustments.append({
+                "productId": product_id,
+                "variantId": None,
+                "productName": existing.name,
+                "variantName": None,
+                "type": "INCREASE" if change > 0 else "DECREASE",
+                "quantity": change,
+                "previousStock": existing.stock,
+                "newStock": product_data.stock,
+                "reason": "Manual stock update",
+                "adjustedBy": adjusted_by,
+            })
+        
+        # Track variant stock changes
+        old_variants_by_name = {v.name: v for v in (existing.variants or [])}
+        
         # Prepare batch operations for related data
         delete_tasks = []
         
@@ -577,6 +603,11 @@ async def update_product(
             create_tasks.append(prisma.productimage.create_many(data=image_data))
         
         if product_data.variants is not None and product_data.variants:
+            # Deduplicate variants by name (keep last occurrence)
+            unique_variants = {}
+            for var in product_data.variants:
+                unique_variants[var.name] = var
+            
             variant_data = [
                 {
                     "productId": product_id,
@@ -590,9 +621,47 @@ async def update_product(
                     "options": Json(var.options) if var.options else None,
                     "imageUrl": var.image_url,
                 }
-                for var in product_data.variants
+                for var in unique_variants.values()
             ]
             create_tasks.append(prisma.productvariant.create_many(data=variant_data))
+            
+            # Track stock changes for each unique variant (only one adjustment per variant)
+            variant_adjustments = {}  # Deduplicate adjustments by variant name
+            for var in unique_variants.values():
+                old_variant = old_variants_by_name.get(var.name)
+                if old_variant:
+                    if var.stock != old_variant.stock:
+                        change = var.stock - old_variant.stock
+                        variant_adjustments[var.name] = {
+                            "productId": product_id,
+                            "variantId": None,  # Will update after variants are created
+                            "productName": existing.name,  # Store product name
+                            "variantName": var.name,  # Store variant name (persisted in DB)
+                            "type": "INCREASE" if change > 0 else "DECREASE",
+                            "quantity": change,
+                            "previousStock": old_variant.stock,
+                            "newStock": var.stock,
+                            "reason": f"Manual stock update for variant: {var.name}",
+                            "adjustedBy": adjusted_by,
+                        }
+                else:
+                    # New variant with initial stock
+                    if var.stock > 0:
+                        variant_adjustments[var.name] = {
+                            "productId": product_id,
+                            "variantId": None,
+                            "productName": existing.name,  # Store product name
+                            "variantName": var.name,  # Store variant name (persisted in DB)
+                            "type": "INITIAL",
+                            "quantity": var.stock,
+                            "previousStock": 0,
+                            "newStock": var.stock,
+                            "reason": f"Initial stock for new variant: {var.name}",
+                            "adjustedBy": adjusted_by,
+                        }
+            
+            # Add variant adjustments to stock_adjustments list
+            stock_adjustments.extend(variant_adjustments.values())
         
         if product_data.attribute_values is not None and product_data.attribute_values:
             attr_data = [
@@ -608,6 +677,39 @@ async def update_product(
         # Execute all creates in parallel
         if create_tasks:
             await asyncio.gather(*create_tasks)
+        
+        # Create stock adjustment records
+        if stock_adjustments:
+            # Get newly created variants to match IDs
+            if product_data.variants:
+                new_variants = await prisma.productvariant.find_many(
+                    where={"productId": product_id}
+                )
+                variant_id_by_name = {v.name: v.id for v in new_variants}
+                
+                # Update variantId for adjustments (keep variantName for DB storage)
+                for adj in stock_adjustments:
+                    if adj.get("variantName"):
+                        adj["variantId"] = variant_id_by_name.get(adj["variantName"])
+            
+            # Create all stock adjustments
+            await prisma.stockadjustment.create_many(
+                data=[
+                    {
+                        "productId": adj.get("productId"),
+                        "variantId": adj.get("variantId"),
+                        "productName": adj.get("productName"),
+                        "variantName": adj.get("variantName"),
+                        "type": adj["type"],
+                        "quantity": adj["quantity"],
+                        "previousStock": adj["previousStock"],
+                        "newStock": adj["newStock"],
+                        "reason": adj.get("reason"),
+                        "adjustedBy": adj.get("adjustedBy"),
+                    }
+                    for adj in stock_adjustments
+                ]
+            )
         
         # Fetch updated product
         product = await prisma.product.find_unique(
