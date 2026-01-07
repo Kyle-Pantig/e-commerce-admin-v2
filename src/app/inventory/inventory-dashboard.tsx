@@ -13,7 +13,11 @@ import {
   IconAlertTriangle,
 } from "@tabler/icons-react"
 
-export function InventoryDashboard() {
+interface InventoryDashboardProps {
+  canEdit?: boolean
+}
+
+export function InventoryDashboard({ canEdit = true }: InventoryDashboardProps) {
   return (
     <div className="px-4 lg:px-6 space-y-6">
       {/* Summary Cards */}

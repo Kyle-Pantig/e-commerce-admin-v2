@@ -3,7 +3,7 @@ from typing import List, Optional
 from supabase import Client
 from supabase_client import get_supabase_client, get_supabase_admin_client
 from prisma_client import get_prisma_client
-from routers.auth import get_current_user, get_current_admin
+from routers.auth import get_current_user, get_current_admin, check_permission
 from models.category_models import (
     CategoryCreate,
     CategoryUpdate,
@@ -48,7 +48,7 @@ async def ensure_unique_slug(base_slug: str, exclude_id: Optional[str] = None) -
 @router.post("", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
 async def create_category(
     category_data: CategoryCreate,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("categories", "edit"))
 ):
     """
     Create a new category (admin only).
@@ -112,7 +112,7 @@ async def create_category(
 @router.get("", response_model=List[CategoryResponse])
 async def list_categories(
     include_inactive: bool = False,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("categories", "view"))
 ):
     """
     List all categories (all authenticated users can read).
@@ -184,7 +184,7 @@ async def list_categories(
 @router.get("/{category_id}", response_model=CategoryResponse)
 async def get_category(
     category_id: str,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("categories", "view"))
 ):
     """
     Get a single category by ID (all authenticated users can read).
@@ -252,7 +252,7 @@ async def get_category(
 async def update_category(
     category_id: str,
     category_data: CategoryUpdate,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("categories", "edit"))
 ):
     """
     Update a category (admin only).
@@ -336,7 +336,7 @@ async def update_category(
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_category(
     category_id: str,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("categories", "edit"))
 ):
     """
     Delete a category (admin only).

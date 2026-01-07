@@ -13,6 +13,7 @@ from supabase_client import get_supabase_client, get_supabase_admin_client
 from supabase import Client
 from prisma_client import get_prisma_client
 from prisma.models import enums
+from prisma import Json
 from models.auth_models import (
     UserCreate,
     UserLogin,
@@ -21,12 +22,19 @@ from models.auth_models import (
     RefreshTokenRequest,
     UserListResponse,
     UserUpdateRequest,
+    UserCreateByAdmin,
+    DEFAULT_STAFF_PERMISSIONS,
+    PERMISSION_MODULES,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 security = HTTPBearer()
 
+
+# ==========================================
+# Authentication Dependencies
+# ==========================================
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -53,6 +61,41 @@ async def get_current_user(
         )
 
 
+async def get_current_user_with_db(
+    current_user = Depends(get_current_user)
+):
+    """Get current user with database info (role, permissions)."""
+    try:
+        prisma = await get_prisma_client()
+        db_user = await prisma.user.find_unique(where={"id": current_user.id})
+        
+        if not db_user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User not found in database"
+            )
+        
+        return db_user  # Return db_user directly
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Failed to get user info: {str(e)}"
+        )
+
+
+def get_role_string(role) -> str:
+    """Helper to get role as string regardless of enum or string type."""
+    if role is None:
+        return ""
+    if hasattr(role, 'value'):
+        return str(role.value)
+    if hasattr(role, 'name'):
+        return str(role.name)
+    return str(role).upper()
+
+
 async def get_current_admin(
     current_user = Depends(get_current_user)
 ):
@@ -61,19 +104,174 @@ async def get_current_admin(
         prisma = await get_prisma_client()
         db_user = await prisma.user.find_unique(where={"id": current_user.id})
         
-        if not db_user or db_user.role != enums.UserRole.ADMIN:
+        role_str = get_role_string(db_user.role) if db_user else ""
+        if not db_user or role_str != "ADMIN":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Admin access required"
             )
         
-        return current_user
+        return db_user  # Return db_user directly
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Admin verification failed: {str(e)}"
+        )
+
+
+async def get_current_staff(
+    current_user = Depends(get_current_user)
+):
+    """Verify that the current user is an admin or approved staff."""
+    try:
+        prisma = await get_prisma_client()
+        db_user = await prisma.user.find_unique(where={"id": current_user.id})
+        
+        if not db_user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User not found"
+            )
+        
+        role_str = get_role_string(db_user.role)
+        
+        # Admin always has access
+        if role_str == "ADMIN":
+            return db_user  # Return db_user directly
+        
+        # Staff must be approved
+        if role_str == "STAFF" and db_user.isApproved:
+            return db_user  # Return db_user directly
+        
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Staff or admin access required"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Staff verification failed: {str(e)}"
+        )
+
+
+def check_permission(module: str, required_level: str = "view"):
+    """
+    Factory function to create permission checker dependency.
+    
+    Usage:
+        @router.get("/products")
+        async def list_products(user = Depends(check_permission("products", "view"))):
+            ...
+        
+        @router.post("/products")
+        async def create_product(user = Depends(check_permission("products", "edit"))):
+            ...
+    """
+    async def permission_checker(current_user = Depends(get_current_user)):
+        try:
+            prisma = await get_prisma_client()
+            db_user = await prisma.user.find_unique(where={"id": current_user.id})
+            
+            if not db_user:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="User not found"
+                )
+            
+            # Get role as string for comparison (handles both enum and string)
+            role_str = get_role_string(db_user.role)
+            
+            # Admin has full access to everything
+            if role_str == "ADMIN":
+                return db_user  # Return db_user instead of trying to modify current_user
+            
+            # Customer has no access to admin features
+            if role_str == "CUSTOMER":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied. Admin or staff access required."
+                )
+            
+            # Staff - check specific permissions
+            if role_str == "STAFF":
+                if not db_user.isApproved:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Your account is pending approval"
+                    )
+                
+                # Get permissions from database (JSON field)
+                permissions = db_user.permissions or DEFAULT_STAFF_PERMISSIONS
+                
+                # Get permission level for the module
+                user_permission = permissions.get(module, "none")
+                
+                # Check if user has required permission level
+                permission_hierarchy = {"none": 0, "view": 1, "edit": 2}
+                user_level = permission_hierarchy.get(user_permission, 0)
+                required = permission_hierarchy.get(required_level, 1)
+                
+                if user_level < required:
+                    if user_level == 0:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail=f"You don't have access to {module}"
+                        )
+                    else:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail=f"You have read-only access to {module}. Edit permission required."
+                        )
+                
+                return db_user  # Return db_user
+            
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission check failed: {str(e)}"
+            )
+    
+    return permission_checker
+
+
+async def get_current_customer(
+    current_user = Depends(get_current_user)
+):
+    """Get current customer user (for customer-facing endpoints)."""
+    try:
+        prisma = await get_prisma_client()
+        db_user = await prisma.user.find_unique(where={"id": current_user.id})
+        
+        if not db_user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User not found"
+            )
+        
+        role_str = get_role_string(db_user.role)
+        if not db_user.isApproved and role_str != "ADMIN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account is pending approval"
+            )
+        
+        return db_user  # Return db_user directly
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Customer verification failed: {str(e)}"
         )
 
 
@@ -184,7 +382,7 @@ async def signup(user_data: UserCreate, supabase: Client = Depends(get_supabase_
                     "id": response.user.id,
                     "email": response.user.email,
                     "fullName": user_data.full_name,
-                        "role": enums.UserRole.USER,  # Default to USER, admin can approve later
+                        "role": enums.UserRole.CUSTOMER,  # Default to CUSTOMER
                         "isApproved": False  # New users need admin approval
                 }
             )
@@ -271,14 +469,23 @@ async def login(user_data: UserLogin, supabase: Client = Depends(get_supabase_cl
                 detail="Invalid email or password",
             )
         
-        # Check if user is approved in database
+        # Check if user is approved and has admin panel access
         try:
             prisma = await get_prisma_client()
             db_user = await prisma.user.find_unique(where={"id": response.user.id})
             
             if db_user:
+                role_str = get_role_string(db_user.role)
+                
+                # CUSTOMER role cannot access - show generic error to not reveal system info
+                if role_str == "CUSTOMER":
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid email or password"
+                    )
+                
                 # Check approval status (admins are always approved)
-                if db_user.role != enums.UserRole.ADMIN and not db_user.isApproved:
+                if role_str != "ADMIN" and not db_user.isApproved:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Your account is pending admin approval. Please wait for approval before signing in."
@@ -340,9 +547,10 @@ async def get_current_user_info(current_user = Depends(get_current_user)):
         else:
             created_at_str = current_user.created_at.isoformat()
     
-    # Get user from database to check approval status and role
+    # Get user from database to check approval status, role, and permissions
     is_approved = None
     role = None
+    permissions = None
     try:
         prisma = await get_prisma_client()
         # Try to find user by ID first
@@ -357,6 +565,10 @@ async def get_current_user_info(current_user = Depends(get_current_user)):
                 role = db_user.role
             else:
                 role = str(db_user.role) if db_user.role else None
+            
+            # Get permissions for staff users
+            if role == "STAFF":
+                permissions = db_user.permissions or DEFAULT_STAFF_PERMISSIONS
         else:
             # User exists in Supabase but not in database
             # Try to find by email as fallback
@@ -370,6 +582,9 @@ async def get_current_user_info(current_user = Depends(get_current_user)):
                         role = db_user.role
                     else:
                         role = str(db_user.role) if db_user.role else None
+                    
+                    if role == "STAFF":
+                        permissions = db_user.permissions or DEFAULT_STAFF_PERMISSIONS
     except Exception as e:
         # If database lookup fails, continue without role/approval status
         pass
@@ -381,7 +596,8 @@ async def get_current_user_info(current_user = Depends(get_current_user)):
         user_metadata=current_user.user_metadata or {},
         created_at=created_at_str,
         is_approved=is_approved,
-        role=role
+        role=role,
+        permissions=permissions
     )
 
 
@@ -434,10 +650,10 @@ async def refresh_token(
 # User management routes
 @router.get("/users", response_model=list[UserListResponse])
 async def list_users(
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("users", "view"))
 ):
     """
-    List all users (read-only for all authenticated users).
+    List all users (admin or staff with users view permission).
     Optimized with DB-level sorting (uses index on createdAt).
     """
     try:
@@ -464,15 +680,16 @@ async def list_users(
             elif isinstance(user.role, str):
                 role_value = user.role
             else:
-                role_value = str(user.role) if user.role else "USER"
+                role_value = str(user.role) if user.role else "CUSTOMER"
             
             result.append(UserListResponse(
                 id=user.id,
                 email=user.email,
                 full_name=user.fullName,
-                role=role_value or "USER",
+                role=role_value or "CUSTOMER",
                 is_approved=user.isApproved,
-                created_at=created_at_str
+                created_at=created_at_str,
+                permissions=user.permissions if role_value == "STAFF" else None
             ))
         
         return result
@@ -492,7 +709,7 @@ async def update_user_approval(
     current_admin = Depends(get_current_admin)
 ):
     """
-    Update user approval status (admin only).
+    Update user approval status, role, and permissions (admin only).
     """
     try:
         prisma = await get_prisma_client()
@@ -525,12 +742,59 @@ async def update_user_approval(
         
         if update_data.role:
             # Validate role value
-            if update_data.role.upper() not in ["USER", "ADMIN"]:
+            valid_roles = ["ADMIN", "STAFF", "CUSTOMER"]
+            if update_data.role.upper() not in valid_roles:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid role. Must be USER or ADMIN"
+                    detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}"
                 )
-            update_dict["role"] = enums.UserRole.ADMIN if update_data.role.upper() == "ADMIN" else enums.UserRole.USER
+            
+            role_upper = update_data.role.upper()
+            if role_upper == "ADMIN":
+                update_dict["role"] = enums.UserRole.ADMIN
+            elif role_upper == "STAFF":
+                update_dict["role"] = enums.UserRole.STAFF
+                # Set default permissions for new staff if not provided
+                if not update_data.permissions and not user.permissions:
+                    update_dict["permissions"] = Json(DEFAULT_STAFF_PERMISSIONS)
+            else:
+                update_dict["role"] = enums.UserRole.CUSTOMER
+                # Clear permissions for non-staff users
+                update_dict["permissions"] = None
+        
+        # Update permissions (only valid for STAFF role)
+        if update_data.permissions:
+            # Validate that user is or will be STAFF
+            target_role = update_data.role.upper() if update_data.role else (
+                user.role.value if hasattr(user.role, 'value') else str(user.role)
+            )
+            if target_role != "STAFF":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Permissions can only be set for STAFF role"
+                )
+            
+            # Validate permission values
+            valid_levels = ["none", "view", "edit"]
+            for module, level in update_data.permissions.items():
+                if module not in PERMISSION_MODULES:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid permission module: {module}. Valid modules: {', '.join(PERMISSION_MODULES)}"
+                    )
+                if level not in valid_levels:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid permission level for {module}: {level}. Must be: {', '.join(valid_levels)}"
+                    )
+                # Staff can never have edit permission for users
+                if module == "users" and level == "edit":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Staff cannot have edit permission for users"
+                    )
+            
+            update_dict["permissions"] = Json(update_data.permissions) if update_data.permissions else None
         
         if not update_dict:
             raise HTTPException(
@@ -557,15 +821,16 @@ async def update_user_approval(
         elif isinstance(updated_user.role, str):
             role_value = updated_user.role
         else:
-            role_value = str(updated_user.role) if updated_user.role else "USER"
+            role_value = str(updated_user.role) if updated_user.role else "CUSTOMER"
         
         return UserListResponse(
             id=updated_user.id,
             email=updated_user.email,
             full_name=updated_user.fullName,
-            role=role_value or "USER",
+            role=role_value or "CUSTOMER",
             is_approved=updated_user.isApproved,
-            created_at=created_at_str
+            created_at=created_at_str,
+            permissions=updated_user.permissions if role_value == "STAFF" else None
         )
     except HTTPException:
         raise
@@ -575,6 +840,115 @@ async def update_user_approval(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update user: {str(e)}"
+        )
+
+
+@router.post("/users", response_model=UserListResponse)
+async def create_user_by_admin(
+    user_data: UserCreateByAdmin,
+    current_admin = Depends(get_current_admin),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """
+    Create a new user (admin only).
+    Admin can specify role and approval status.
+    """
+    try:
+        # Validate role
+        valid_roles = ["ADMIN", "STAFF", "CUSTOMER"]
+        role_upper = user_data.role.upper()
+        if role_upper not in valid_roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}"
+            )
+        
+        # Prepare user metadata
+        metadata = {}
+        if user_data.full_name:
+            metadata["full_name"] = user_data.full_name
+        
+        # Create user in Supabase with admin client
+        admin_client = get_supabase_admin_client()
+        admin_response = admin_client.auth.admin.create_user({
+            "email": user_data.email,
+            "password": user_data.password,
+            "email_confirm": True,
+            "user_metadata": metadata
+        })
+        
+        if not admin_response.user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create user in Supabase"
+            )
+        
+        # Determine role enum
+        if role_upper == "ADMIN":
+            db_role = enums.UserRole.ADMIN
+        elif role_upper == "STAFF":
+            db_role = enums.UserRole.STAFF
+        else:
+            db_role = enums.UserRole.CUSTOMER
+        
+        # Set permissions for staff
+        permissions = None
+        if role_upper == "STAFF":
+            if user_data.permissions:
+                # Validate permissions
+                valid_levels = ["none", "view", "edit"]
+                for module, level in user_data.permissions.items():
+                    if module not in PERMISSION_MODULES:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid permission module: {module}"
+                        )
+                    if level not in valid_levels:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid permission level for {module}: {level}"
+                        )
+                    if module == "users" and level == "edit":
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Staff cannot have edit permission for users"
+                        )
+                permissions = user_data.permissions
+            else:
+                permissions = DEFAULT_STAFF_PERMISSIONS
+        
+        # Create user in database
+        prisma = await get_prisma_client()
+        created_user = await prisma.user.create(
+            data={
+                "id": admin_response.user.id,
+                "email": user_data.email,
+                "fullName": user_data.full_name,
+                "role": db_role,
+                "isApproved": user_data.is_approved,
+                "permissions": Json(permissions) if permissions else None
+            }
+        )
+        
+        created_at_str = created_user.createdAt.isoformat() if created_user.createdAt else None
+        
+        return UserListResponse(
+            id=created_user.id,
+            email=created_user.email,
+            full_name=created_user.fullName,
+            role=role_upper,
+            is_approved=created_user.isApproved,
+            created_at=created_at_str,
+            permissions=permissions if role_upper == "STAFF" else None
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}"
         )
 
 

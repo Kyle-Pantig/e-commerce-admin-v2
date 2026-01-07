@@ -18,7 +18,7 @@ from models.order_models import (
     PaymentStatus,
     PaymentMethod,
 )
-from routers.auth import get_current_user, get_current_admin
+from routers.auth import get_current_user, get_current_admin, check_permission
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
@@ -126,7 +126,7 @@ def build_order_list_response(order) -> OrderListResponse:
 @router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(
     order_data: OrderCreate,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("orders", "edit"))
 ):
     """Create a new order (Admin can create manual orders for testing)"""
     prisma = await get_prisma_client()
@@ -295,7 +295,7 @@ async def list_orders(
     date_to: Optional[datetime] = None,
     sort_by: str = Query("created_at", regex="^(created_at|updated_at|total|order_number)$"),
     sort_order: str = Query("desc", regex="^(asc|desc)$"),
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("orders", "view"))
 ):
     """List orders with filtering and pagination"""
     prisma = await get_prisma_client()
@@ -362,7 +362,7 @@ async def list_orders(
 @router.get("/{order_id}", response_model=OrderResponse)
 async def get_order(
     order_id: str,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("orders", "view"))
 ):
     """Get order by ID"""
     prisma = await get_prisma_client()
@@ -387,7 +387,7 @@ async def get_order(
 @router.get("/by-number/{order_number}", response_model=OrderResponse)
 async def get_order_by_number(
     order_number: str,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("orders", "view"))
 ):
     """Get order by order number"""
     prisma = await get_prisma_client()
@@ -413,7 +413,7 @@ async def get_order_by_number(
 async def update_order(
     order_id: str,
     order_data: OrderUpdate,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("orders", "edit"))
 ):
     """Update order details (Admin only)"""
     prisma = await get_prisma_client()
@@ -505,7 +505,7 @@ async def update_order(
 async def update_order_status(
     order_id: str,
     status_update: OrderStatusUpdate,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("orders", "edit"))
 ):
     """Update order status (Admin only)"""
     prisma = await get_prisma_client()
@@ -545,7 +545,7 @@ async def update_order_status(
                 "fromStatus": old_status,
                 "toStatus": new_status,
                 "note": status_update.note,
-                "changedBy": current_admin.email if hasattr(current_admin, 'email') else str(current_admin.id),
+                "changedBy": current_user.email if hasattr(current_user, 'email') else str(current_user.id),
             }
         )
         
@@ -671,7 +671,7 @@ async def update_order_status(
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_order(
     order_id: str,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("orders", "edit"))
 ):
     """Delete an order (Admin only) - Use with caution, prefer cancellation.
     Optimized with explicit parallel deletes for safety."""
@@ -704,7 +704,7 @@ async def delete_order(
 
 @router.get("/stats/summary")
 async def get_order_stats(
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("orders", "view"))
 ):
     """Get order statistics summary - optimized with parallel queries"""
     import asyncio

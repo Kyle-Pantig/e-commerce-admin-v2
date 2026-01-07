@@ -78,10 +78,12 @@ import type { ProductListItem, Category, ProductStatus } from "@/lib/api/types"
 
 interface ProductsTableProps {
   currentUserRole?: string
+  canEdit?: boolean
 }
 
-export function ProductsTable({ currentUserRole }: ProductsTableProps) {
+export function ProductsTable({ currentUserRole, canEdit = true }: ProductsTableProps) {
   const isAdmin = currentUserRole?.toUpperCase() === "ADMIN"
+  const hasEditPermission = isAdmin || canEdit
   const router = useRouter()
   const searchParams = useSearchParams()
   const queryClient = useQueryClient()
@@ -470,7 +472,8 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
 
   // Columns definition
   const columns: ColumnDef<ProductListItem>[] = useMemo(() => [
-    {
+    // Only show checkbox column if user has edit permission
+    ...(hasEditPermission ? [{
       id: "select",
       header: () => (
         <Checkbox
@@ -478,7 +481,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
           onCheckedChange={toggleAllSelection}
         />
       ),
-      cell: ({ row }) => (
+      cell: ({ row }: { row: { original: ProductListItem } }) => (
         <Checkbox
           checked={selectedProductIds.has(row.original.id)}
           onCheckedChange={() => toggleRowSelection(row.original.id)}
@@ -486,7 +489,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
       ),
       enableSorting: false,
       enableHiding: false,
-    },
+    }] : []),
     {
       accessorKey: "primary_image",
       header: "Image",
@@ -660,7 +663,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
         </div>
       ),
     },
-    ...(isAdmin
+    ...(hasEditPermission
       ? [
           {
             id: "actions",
@@ -687,29 +690,35 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleEdit(product)}>
-                      <IconEdit className="mr-2 h-4 w-4" />
-                      Edit
-                    </DropdownMenuItem>
+                    {hasEditPermission && (
+                      <DropdownMenuItem onClick={() => handleEdit(product)}>
+                        <IconEdit className="mr-2 h-4 w-4" />
+                        Edit
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onClick={() => window.open(`/products/${product.slug}`, "_blank")}>
                       <IconEye className="mr-2 h-4 w-4" />
                       View
                     </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => handleDuplicate(product)}
-                      disabled={duplicateMutation.isPending}
-                    >
-                      <IconPlus className="mr-2 h-4 w-4" />
-                      Duplicate
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onClick={() => handleDelete(product)}
-                      className="text-destructive"
-                    >
-                      <IconTrash className="mr-2 h-4 w-4" />
-                      Delete
-                    </DropdownMenuItem>
+                    {hasEditPermission && (
+                      <>
+                        <DropdownMenuItem
+                          onClick={() => handleDuplicate(product)}
+                          disabled={duplicateMutation.isPending}
+                        >
+                          <IconPlus className="mr-2 h-4 w-4" />
+                          Duplicate
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => handleDelete(product)}
+                          className="text-destructive"
+                        >
+                          <IconTrash className="mr-2 h-4 w-4" />
+                          Delete
+                        </DropdownMenuItem>
+                      </>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )
@@ -717,7 +726,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
           },
         ]
       : []),
-  ], [isAdmin, deleteMutation.isPending, duplicatingProductId, selectedProductIds, productsData?.items])
+  ], [isAdmin, hasEditPermission, deleteMutation.isPending, duplicatingProductId, selectedProductIds, productsData?.items])
 
   // Initialize table
   const table = useReactTable({
@@ -744,7 +753,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
           </div>
           <Skeleton className="h-9 w-[180px] rounded-md border" />
           <Skeleton className="h-9 w-[140px] rounded-md border" />
-          {isAdmin && <Skeleton className="h-9 w-[140px] rounded-md border" />}
+          {hasEditPermission && <Skeleton className="h-9 w-[140px] rounded-md border" />}
         </div>
         
         {/* Table Skeleton */}
@@ -759,7 +768,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
                 <TableHead>Stock</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
-                {isAdmin && <TableHead className="w-[80px]">Actions</TableHead>}
+                {hasEditPermission && <TableHead className="w-[80px]">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -772,7 +781,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
                   <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                  {isAdmin && <TableCell><Skeleton className="h-8 w-8" /></TableCell>}
+                  {hasEditPermission && <TableCell><Skeleton className="h-8 w-8" /></TableCell>}
                 </TableRow>
               ))}
             </TableBody>
@@ -842,7 +851,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
             </Select>
           </div>
           
-          {isAdmin && (
+          {hasEditPermission && (
             <Button onClick={() => router.push("/products/new")} className="w-full sm:w-auto sm:ml-auto">
               <IconPlus className="mr-2 h-4 w-4" />
               Create Product
@@ -882,7 +891,7 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={isAdmin ? 8 : 7}
+                    colSpan={hasEditPermission ? 8 : 7}
                     className="text-center text-muted-foreground py-8"
                   >
                     <IconPackage className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -970,63 +979,66 @@ export function ProductsTable({ currentUserRole }: ProductsTableProps) {
       />
 
       {/* Floating Bulk Actions Bar */}
-      <div className={cn(
-        "fixed bottom-6 z-50 transition-all duration-300 ease-in-out px-4 flex justify-center pointer-events-none",
-        isMobile ? "w-full left-0" : sidebarState === "expanded" ? "w-[calc(100%-18rem)] left-72" : "w-[calc(100%-3rem)] left-12"
-      )}>
+      {/* Floating Action Bar - Only show for users with edit permission */}
+      {hasEditPermission && (
         <div className={cn(
-          "bg-background/95 backdrop-blur-md border shadow-2xl rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-center gap-3 sm:gap-6 pointer-events-auto transition-all transform duration-500",
-          selectedProductIds.size > 0 ? "translate-y-0 opacity-100 scale-100" : "translate-y-20 opacity-0 scale-95 pointer-events-none"
+          "fixed bottom-6 z-50 transition-all duration-300 ease-in-out px-4 flex justify-center pointer-events-none",
+          isMobile ? "w-full left-0" : sidebarState === "expanded" ? "w-[calc(100%-18rem)] left-72" : "w-[calc(100%-3rem)] left-12"
         )}>
-          <div className="flex items-center gap-3 sm:pr-6 sm:border-r">
-            <div className="flex items-center justify-center h-8 w-8 rounded-full bg-primary text-primary-foreground text-sm font-bold">
-              {selectedProductIds.size}
+          <div className={cn(
+            "bg-background/95 backdrop-blur-md border shadow-2xl rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-center gap-3 sm:gap-6 pointer-events-auto transition-all transform duration-500",
+            selectedProductIds.size > 0 ? "translate-y-0 opacity-100 scale-100" : "translate-y-20 opacity-0 scale-95 pointer-events-none"
+          )}>
+            <div className="flex items-center gap-3 sm:pr-6 sm:border-r">
+              <div className="flex items-center justify-center h-8 w-8 rounded-full bg-primary text-primary-foreground text-sm font-bold">
+                {selectedProductIds.size}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-bold">
+                  Product{selectedProductIds.size !== 1 ? "s" : ""} Selected
+                </span>
+                <span className="text-xs text-muted-foreground hidden sm:block">Choose an action below</span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-bold">
-                Product{selectedProductIds.size !== 1 ? "s" : ""} Selected
-              </span>
-              <span className="text-xs text-muted-foreground hidden sm:block">Choose an action below</span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBulkStatusDialogOpen(true)}
+                disabled={bulkStatusMutation.isPending}
+                className="h-9 whitespace-nowrap"
+              >
+                <IconEdit className="h-4 w-4 mr-2" />
+                Update Status
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBulkDeleteDialogOpen(true)}
+                disabled={bulkDeleteMutation.isPending}
+                className="h-9 text-destructive hover:text-destructive hover:bg-destructive/10"
+              >
+                <IconTrash className="h-4 w-4 mr-2" />
+                Delete
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  if (selectedProductIds.size === productsData?.items.length) {
+                    setSelectedProductIds(new Set())
+                  } else {
+                    setSelectedProductIds(new Set(productsData?.items.map(p => p.id) || []))
+                  }
+                }}
+                className="h-9 text-muted-foreground hover:text-foreground"
+              >
+                {selectedProductIds.size === productsData?.items.length ? "Deselect All" : "Select All"}
+              </Button>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setBulkStatusDialogOpen(true)}
-              disabled={bulkStatusMutation.isPending}
-              className="h-9 whitespace-nowrap"
-            >
-              <IconEdit className="h-4 w-4 mr-2" />
-              Update Status
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setBulkDeleteDialogOpen(true)}
-              disabled={bulkDeleteMutation.isPending}
-              className="h-9 text-destructive hover:text-destructive hover:bg-destructive/10"
-            >
-              <IconTrash className="h-4 w-4 mr-2" />
-              Delete
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                if (selectedProductIds.size === productsData?.items.length) {
-                  setSelectedProductIds(new Set())
-                } else {
-                  setSelectedProductIds(new Set(productsData?.items.map(p => p.id) || []))
-                }
-              }}
-              className="h-9 text-muted-foreground hover:text-foreground"
-            >
-              {selectedProductIds.size === productsData?.items.length ? "Deselect All" : "Select All"}
-            </Button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

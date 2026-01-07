@@ -40,13 +40,15 @@ import type { Category, CategoryCreate, CategoryUpdate } from "@/lib/api/types"
 
 interface CategoriesTableProps {
   currentUserRole?: string
+  canEdit?: boolean
 }
 
 // Extended type with level for UI
 type CategoryWithLevel = Category & { level?: number }
 
-export function CategoriesTable({ currentUserRole }: CategoriesTableProps) {
+export function CategoriesTable({ currentUserRole, canEdit = true }: CategoriesTableProps) {
   const isAdmin = currentUserRole?.toUpperCase() === "ADMIN"
+  const hasEditPermission = isAdmin || canEdit
   const router = useRouter()
   const queryClient = useQueryClient()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -349,7 +351,7 @@ export function CategoriesTable({ currentUserRole }: CategoriesTableProps) {
                   <TableHead>Order</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
-                  {isAdmin && <TableHead className="w-[100px]">Actions</TableHead>}
+                  {hasEditPermission && <TableHead className="w-[100px]">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -370,7 +372,7 @@ export function CategoriesTable({ currentUserRole }: CategoriesTableProps) {
                     <TableCell>
                       <Skeleton className="h-4 w-24" />
                     </TableCell>
-                    {isAdmin && (
+                    {hasEditPermission && (
                       <TableCell>
                         <Skeleton className="h-8 w-8" />
                       </TableCell>
@@ -388,7 +390,7 @@ export function CategoriesTable({ currentUserRole }: CategoriesTableProps) {
 
   return (
     <div className="px-4 lg:px-6">
-      {isAdmin && (
+      {hasEditPermission && (
         <div className="mb-4 flex justify-end">
           <Button onClick={() => setCreateDialogOpen(true)}>
             <IconPlus className="mr-2 h-4 w-4" />
@@ -426,7 +428,7 @@ export function CategoriesTable({ currentUserRole }: CategoriesTableProps) {
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={isAdmin ? 6 : 5}
+                    colSpan={hasEditPermission ? 6 : 5}
                     className="text-center text-muted-foreground py-8"
                   >
                     No categories found

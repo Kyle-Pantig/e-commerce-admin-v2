@@ -103,6 +103,7 @@ import { useSidebar } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 import { LoadingState } from "@/components/ui/loading-state"
 import { ImageCropModal } from "@/components/shared"
+import { DateTimePicker } from "@/components/ui/date-time-picker"
 
 interface ProductFormProps {
   product?: Product
@@ -459,6 +460,8 @@ export function ProductForm({
       meta_description: product?.meta_description || "",
       is_featured: product?.is_featured || false,
       has_variants: product?.has_variants || false,
+      is_new: product?.is_new ?? true, // Default to true for new products
+      new_until: product?.new_until || null,
       attribute_values: product?.attribute_values?.map((av) => ({
         attribute_id: av.attribute_id,
         value: av.value,
@@ -506,6 +509,8 @@ export function ProductForm({
         meta_description: product.meta_description || "",
         is_featured: product.is_featured || false,
         has_variants: product.has_variants || false,
+        is_new: product.is_new ?? true,
+        new_until: product.new_until || null,
         attribute_values: product.attribute_values?.map((av) => ({
           attribute_id: av.attribute_id,
           value: av.value,
@@ -562,6 +567,8 @@ export function ProductForm({
       meta_description: product.meta_description || "",
       is_featured: product.is_featured || false,
       has_variants: product.has_variants || false,
+      is_new: product.is_new ?? true,
+      new_until: product.new_until || null,
       attribute_values: (product.attribute_values || []).map((av) => ({
         attribute_id: av.attribute_id,
         value: av.value,
@@ -602,7 +609,7 @@ export function ProductForm({
       }
       
       // Handle booleans
-      if (typeof original === "boolean" || typeof current === "boolean" || field === "is_featured" || field === "has_variants" || field === "track_inventory") {
+      if (typeof original === "boolean" || typeof current === "boolean" || field === "is_featured" || field === "has_variants" || field === "track_inventory" || field === "is_new") {
         if (Boolean(current) !== Boolean(original)) {
           return true
         }
@@ -634,6 +641,8 @@ export function ProductForm({
       ["meta_description", currentValues.meta_description, originalValues.meta_description],
       ["is_featured", currentValues.is_featured, originalValues.is_featured],
       ["has_variants", currentValues.has_variants, originalValues.has_variants],
+      ["is_new", currentValues.is_new, originalValues.is_new],
+      ["new_until", currentValues.new_until, originalValues.new_until],
     ]
 
     for (const [field, current, original] of fields) {
@@ -2006,6 +2015,37 @@ export function ProductForm({
                       checked={form.watch("is_featured")}
                       onCheckedChange={(val) => form.setValue("is_featured", val === true, { shouldDirty: true })}
                     />
+                  </div>
+
+                  <div className="mt-4 p-3 rounded-lg bg-green-500/5 border border-green-500/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="is_new" className="text-[10px] font-bold uppercase tracking-widest text-green-600 cursor-pointer">
+                        New Product
+                      </Label>
+                      <Checkbox 
+                        id="is_new" 
+                        checked={form.watch("is_new")}
+                        onCheckedChange={(val) => form.setValue("is_new", val === true, { shouldDirty: true })}
+                      />
+                    </div>
+                    {form.watch("is_new") && (
+                      <div className="pt-2 border-t border-green-500/10 space-y-2">
+                        <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                          New Until (Optional)
+                        </Label>
+                        <DateTimePicker
+                          dateLabel="Expiry Date"
+                          timeLabel="Expiry Time"
+                          value={form.watch("new_until") ? new Date(form.watch("new_until")!) : null}
+                          onChange={(date) => form.setValue("new_until", date ? date.toISOString() : null, { shouldDirty: true })}
+                          placeholder="Select date"
+                          minDate={new Date()}
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Auto-expire the &quot;New&quot; badge after this date
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </FieldGroup>
               </FieldSet>

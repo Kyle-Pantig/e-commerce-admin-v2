@@ -11,7 +11,11 @@ const InventoryDashboard = dynamic(
   }
 )
 
-export function InventoryWrapper() {
-  return <InventoryDashboard />
+interface InventoryWrapperProps {
+  canEdit?: boolean
+}
+
+export function InventoryWrapper({ canEdit = true }: InventoryWrapperProps) {
+  return <InventoryDashboard canEdit={canEdit} />
 }
 

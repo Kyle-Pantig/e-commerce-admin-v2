@@ -44,6 +44,13 @@ export type { ProductListResponse } from "./services/products"
 
 export { usersApi, authApi } from "./services/users"
 
+// Permission constants
+export { 
+  DEFAULT_STAFF_PERMISSIONS, 
+  PERMISSION_MODULES, 
+  PERMISSION_LABELS 
+} from "./types"
+
 export { ordersApi } from "./services/orders"
 export type { OrderListResponse } from "./services/orders"
 
@@ -100,10 +107,14 @@ export type {
   ProductUpdate,
   ProductListParams,
 
-  // Users
+  // Users & Permissions
   UserRole,
+  PermissionLevel,
+  PermissionModule,
+  StaffPermissions,
   User,
   UserUpdate,
+  UserCreate,
   AuthUser,
   AuthResponse,
 

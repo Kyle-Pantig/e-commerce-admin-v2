@@ -5,6 +5,7 @@ Pydantic models for product management endpoints.
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from enum import Enum
+from datetime import datetime
 
 
 class ProductStatus(str, Enum):
@@ -168,6 +169,8 @@ class ProductCreate(BaseModel):
     # Flags
     is_featured: bool = False
     has_variants: bool = False
+    is_new: bool = True  # Default to True for new products
+    new_until: Optional[datetime] = None  # Auto-expire "new" status after this date
     
     # Nested data for creation
     images: Optional[List[ProductImageCreate]] = None
@@ -209,6 +212,8 @@ class ProductUpdate(BaseModel):
     # Flags
     is_featured: Optional[bool] = None
     has_variants: Optional[bool] = None
+    is_new: Optional[bool] = None
+    new_until: Optional[datetime] = None
     
     # Nested data updates
     attribute_values: Optional[List[ProductAttributeValueCreate]] = None
@@ -253,6 +258,8 @@ class ProductResponse(BaseModel):
     # Flags
     is_featured: bool
     has_variants: bool
+    is_new: bool = False
+    new_until: Optional[str] = None
     
     # Nested data
     images: Optional[List[ProductImageResponse]] = None
@@ -291,6 +298,8 @@ class ProductListResponse(BaseModel):
     category_name: Optional[str] = None
     is_featured: bool
     has_variants: bool
+    is_new: bool = False
+    new_until: Optional[str] = None
     primary_image: Optional[str] = None
     variants: Optional[List["ProductVariantListItem"]] = None  # For stock calculation
     created_at: str

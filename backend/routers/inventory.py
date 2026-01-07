@@ -28,7 +28,7 @@ from models.inventory_models import (
     LowStockAlert,
     LowStockAlertsResponse,
 )
-from routers.auth import get_current_user, get_current_admin
+from routers.auth import get_current_user, get_current_admin, check_permission
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
@@ -73,7 +73,7 @@ def build_adjustment_response(adjustment, product=None, variant=None) -> StockAd
 @router.post("/adjust", response_model=StockAdjustmentResponse, status_code=status.HTTP_201_CREATED)
 async def create_stock_adjustment(
     adjustment: StockAdjustmentCreate,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("inventory", "edit"))
 ):
     """Create a single stock adjustment (Admin only)"""
     prisma = await get_prisma_client()
@@ -136,7 +136,7 @@ async def create_stock_adjustment(
                 "newStock": new_stock,
                 "reason": adjustment.reason,
                 "notes": adjustment.notes,
-                "adjustedBy": current_admin.email if hasattr(current_admin, 'email') else str(current_admin.id),
+                "adjustedBy": current_user.email if hasattr(current_user, 'email') else str(current_user.id),
             }
         )
         
@@ -146,7 +146,7 @@ async def create_stock_adjustment(
 @router.post("/bulk-adjust", response_model=BulkStockAdjustmentResponse)
 async def bulk_stock_adjustment(
     bulk_adjustment: BulkStockAdjustmentCreate,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("inventory", "edit"))
 ):
     """Bulk stock adjustment for multiple products/variants (Admin only)"""
     prisma = await get_prisma_client()
@@ -211,7 +211,7 @@ async def bulk_stock_adjustment(
                         "newStock": new_stock,
                         "reason": bulk_adjustment.reason,
                         "notes": bulk_adjustment.notes,
-                        "adjustedBy": current_admin.email if hasattr(current_admin, 'email') else str(current_admin.id),
+                        "adjustedBy": current_user.email if hasattr(current_user, 'email') else str(current_user.id),
                     }
                 )
                 
@@ -240,7 +240,7 @@ async def get_stock_history(
     end_date: Optional[datetime] = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("inventory", "view"))
 ):
     """Get stock adjustment history with filtering"""
     prisma = await get_prisma_client()
@@ -290,7 +290,7 @@ async def get_product_stock_history(
     include_variants: bool = True,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("inventory", "view"))
 ):
     """Get stock history for a specific product (including its variants)"""
     prisma = await get_prisma_client()
@@ -346,7 +346,7 @@ async def get_product_stock_history(
 
 @router.get("/summary", response_model=StockSummary)
 async def get_stock_summary(
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("inventory", "view"))
 ):
     """Get overall stock summary"""
     prisma = await get_prisma_client()
@@ -396,7 +396,7 @@ async def get_product_stock_reports(
     sort_by: str = "stock",  # "stock", "name", "value"
     sort_order: str = "asc",
     limit: int = Query(50, ge=1, le=200),
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("inventory", "view"))
 ):
     """Get detailed stock report for products"""
     prisma = await get_prisma_client()
@@ -488,7 +488,7 @@ async def get_product_stock_reports(
 @router.get("/reports/movements", response_model=StockMovementReport)
 async def get_stock_movement_report(
     days: int = Query(30, ge=1, le=365),
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("inventory", "view"))
 ):
     """Get stock movement report for a period"""
     prisma = await get_prisma_client()
@@ -550,7 +550,7 @@ async def get_stock_movement_report(
 async def get_low_stock_alerts(
     threshold: int = Query(10, ge=1),
     include_out_of_stock: bool = True,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("inventory", "view"))
 ):
     """Get low stock alerts for products and variants"""
     prisma = await get_prisma_client()
@@ -679,7 +679,7 @@ async def quick_stock_update(
     new_stock: int = Query(..., ge=0),
     variant_id: Optional[str] = None,
     reason: str = "Manual update",
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("inventory", "edit"))
 ):
     """Quick update stock for a product or variant (Admin only)"""
     prisma = await get_prisma_client()
@@ -713,7 +713,7 @@ async def quick_stock_update(
                     "previousStock": current_stock,
                     "newStock": new_stock,
                     "reason": reason,
-                    "adjustedBy": current_admin.email if hasattr(current_admin, 'email') else str(current_admin.id),
+                    "adjustedBy": current_user.email if hasattr(current_user, 'email') else str(current_user.id),
                 }
             )
         else:
@@ -739,7 +739,7 @@ async def quick_stock_update(
                     "previousStock": current_stock,
                     "newStock": new_stock,
                     "reason": reason,
-                    "adjustedBy": current_admin.email if hasattr(current_admin, 'email') else str(current_admin.id),
+                    "adjustedBy": current_user.email if hasattr(current_user, 'email') else str(current_user.id),
                 }
             )
     

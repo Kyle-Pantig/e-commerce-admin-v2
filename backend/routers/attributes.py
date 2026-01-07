@@ -3,7 +3,7 @@ from typing import List, Optional
 from supabase import Client
 from supabase_client import get_supabase_client
 from prisma_client import get_prisma_client
-from routers.auth import get_current_user, get_current_admin
+from routers.auth import get_current_user, get_current_admin, check_permission
 from models.attribute_models import (
     AttributeCreate,
     AttributeUpdate,
@@ -100,7 +100,7 @@ async def _batch_get_category_ids(prisma, attribute_ids: list) -> dict:
 @router.post("", response_model=AttributeResponse, status_code=status.HTTP_201_CREATED)
 async def create_attribute(
     attribute_data: AttributeCreate,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("attributes", "edit"))
 ):
     """
     Create a new attribute (admin only).
@@ -188,7 +188,7 @@ async def create_attribute(
 @router.get("", response_model=List[AttributeResponse])
 async def list_attributes(
     include_inactive: bool = False,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("attributes", "view"))
 ):
     """
     List all attributes (all authenticated users can read).
@@ -236,7 +236,7 @@ async def list_attributes(
 
 @router.get("/filterable/all", response_model=List[AttributeResponse])
 async def get_filterable_attributes(
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("attributes", "view"))
 ):
     """
     Get all filterable attributes (for storefront filter UI).
@@ -286,7 +286,7 @@ async def get_attributes_by_category(
     category_id: str,
     include_inactive: bool = False,
     include_inherited: bool = True,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("attributes", "view"))
 ):
     """
     Get all attributes assigned to a specific category.
@@ -383,7 +383,7 @@ async def get_attributes_by_category(
 @router.post("/bulk/reorder", response_model=BulkOperationResponse, status_code=status.HTTP_200_OK)
 async def bulk_reorder_attributes(
     data: AttributeBulkReorder,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("attributes", "edit"))
 ):
     """
     Bulk update attribute display orders (admin only).
@@ -424,7 +424,7 @@ async def bulk_reorder_attributes(
 @router.post("/bulk/delete", response_model=BulkOperationResponse, status_code=status.HTTP_200_OK)
 async def bulk_delete_attributes(
     data: AttributeBulkDelete,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("attributes", "edit"))
 ):
     """
     Bulk delete multiple attributes (admin only).
@@ -471,7 +471,7 @@ async def bulk_delete_attributes(
 @router.get("/{attribute_id}", response_model=AttributeResponse)
 async def get_attribute(
     attribute_id: str,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("attributes", "view"))
 ):
     """
     Get a single attribute by ID (all authenticated users can read).
@@ -504,7 +504,7 @@ async def get_attribute(
 async def update_attribute(
     attribute_id: str,
     attribute_data: AttributeUpdate,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("attributes", "edit"))
 ):
     """
     Update an existing attribute (admin only).
@@ -615,7 +615,7 @@ async def update_attribute(
 @router.delete("/{attribute_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_attribute(
     attribute_id: str,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("attributes", "edit"))
 ):
     """
     Delete an attribute (admin only).
@@ -659,7 +659,7 @@ async def delete_attribute(
 @router.patch("/{attribute_id}/toggle-status", response_model=AttributeResponse)
 async def toggle_attribute_status(
     attribute_id: str,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("attributes", "edit"))
 ):
     """
     Toggle an attribute's active status (admin only).
@@ -695,7 +695,7 @@ async def toggle_attribute_status(
 @router.post("/{attribute_id}/duplicate", response_model=AttributeResponse, status_code=status.HTTP_201_CREATED)
 async def duplicate_attribute(
     attribute_id: str,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("attributes", "edit"))
 ):
     """
     Duplicate an existing attribute (admin only).
@@ -767,10 +767,10 @@ async def duplicate_attribute(
 async def assign_attribute_to_categories(
     attribute_id: str,
     data: AttributeCategoryAssignment,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("attributes", "edit"))
 ):
     """
-    Assign an attribute to multiple categories (admin only).
+    Assign an attribute to multiple categories (admin or staff with edit permission).
     Adds to existing assignments without removing current ones.
     Optimized with batch category validation and create_many.
     """
@@ -820,10 +820,10 @@ async def assign_attribute_to_categories(
 async def remove_attribute_from_categories(
     attribute_id: str,
     data: AttributeCategoryAssignment,
-    current_admin = Depends(get_current_admin)
+    current_user = Depends(check_permission("attributes", "edit"))
 ):
     """
-    Remove an attribute from multiple categories (admin only).
+    Remove an attribute from multiple categories (admin or staff with edit permission).
     Optimized with batch delete.
     """
     try:

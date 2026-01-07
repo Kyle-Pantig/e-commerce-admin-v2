@@ -1,17 +1,19 @@
 import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
+import type { StaffPermissions, UserRole } from "@/lib/api/types"
 
 export interface UserData {
   id: string
   email: string
   name: string
   avatar?: string
-  role?: string
+  role?: UserRole
   isApproved?: boolean
+  permissions?: StaffPermissions | null
 }
 
 /**
- * Get authenticated user data with approval status
+ * Get authenticated user data with approval status and permissions
  * Redirects to login if not authenticated
  * Redirects to login with error if not approved (for non-admin users)
  */
@@ -49,14 +51,21 @@ export async function getAuthenticatedUser(): Promise<UserData> {
 
       if (response.ok) {
         const userInfo = await response.json()
-        userData.role = userInfo.role
+        userData.role = userInfo.role as UserRole
         userData.isApproved = userInfo.is_approved
+        userData.permissions = userInfo.permissions
 
         // Check if user is approved (admins are always approved)
         if (userInfo.role !== "ADMIN" && userInfo.is_approved === false) {
           // Sign out the user since they're not approved
           await supabase.auth.signOut()
           redirect("/login?error=pending_approval")
+        }
+        
+        // Customers cannot access - silently sign out without revealing system info
+        if (userInfo.role === "CUSTOMER") {
+          await supabase.auth.signOut()
+          redirect("/login?error=session_expired")
         }
       }
     }

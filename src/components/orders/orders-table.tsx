@@ -58,6 +58,7 @@ import type { OrderListItem, OrderStatus, PaymentStatus } from "@/lib/api/types"
 
 interface OrdersTableProps {
   currentUserRole?: string
+  canEdit?: boolean
 }
 
 // Status badge configuration
@@ -80,8 +81,9 @@ const paymentStatusConfig: Record<PaymentStatus, { label: string; variant: "defa
   PARTIALLY_REFUNDED: { label: "Partial Refund", variant: "outline" },
 }
 
-export function OrdersTable({ currentUserRole }: OrdersTableProps) {
+export function OrdersTable({ currentUserRole, canEdit = true }: OrdersTableProps) {
   const isAdmin = currentUserRole?.toUpperCase() === "ADMIN"
+  const hasEditPermission = isAdmin || canEdit
   const router = useRouter()
   const searchParams = useSearchParams()
   const queryClient = useQueryClient()
@@ -419,7 +421,7 @@ export function OrdersTable({ currentUserRole }: OrdersTableProps) {
                   <IconEye className="mr-2 h-4 w-4" />
                   View Details
                 </DropdownMenuItem>
-                {isAdmin && (
+                {hasEditPermission && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
@@ -463,7 +465,7 @@ export function OrdersTable({ currentUserRole }: OrdersTableProps) {
           </div>
           <Skeleton className="h-9 w-[150px]" />
           <Skeleton className="h-9 w-[150px]" />
-          {isAdmin && <Skeleton className="h-9 w-[140px]" />}
+          {hasEditPermission && <Skeleton className="h-9 w-[140px]" />}
         </div>
 
         {/* Table Skeleton */}
@@ -560,7 +562,7 @@ export function OrdersTable({ currentUserRole }: OrdersTableProps) {
           </SelectContent>
         </Select>
 
-        {isAdmin && (
+        {hasEditPermission && (
           <Button onClick={() => router.push("/orders/new")}>
             <IconPlus className="mr-2 h-4 w-4" />
             Create Order

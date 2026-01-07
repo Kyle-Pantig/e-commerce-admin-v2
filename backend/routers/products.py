@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import Optional, List
 from prisma import Json
 from prisma_client import get_prisma_client
-from routers.auth import get_current_user, get_current_admin
+from routers.auth import get_current_user, get_current_admin, check_permission
 from models.product_models import (
     ProductCreate,
     ProductUpdate,
@@ -133,6 +133,8 @@ def build_product_response(product, include_details: bool = True) -> ProductResp
         meta_description=product.metaDescription,
         is_featured=product.isFeatured,
         has_variants=product.hasVariants,
+        is_new=product.isNew,
+        new_until=product.newUntil.isoformat() if product.newUntil else None,
         images=images,
         variants=variants,
         attribute_values=attribute_values,
@@ -175,6 +177,8 @@ def build_product_list_response(product) -> ProductListResponse:
         category_name=category_name,
         is_featured=product.isFeatured,
         has_variants=product.hasVariants,
+        is_new=product.isNew,
+        new_until=product.newUntil.isoformat() if product.newUntil else None,
         primary_image=primary_image,
         variants=variants,
         created_at=product.createdAt.isoformat() if product.createdAt else "",
@@ -193,7 +197,7 @@ async def list_products(
     sort_by: str = "created_at",
     sort_order: str = "desc",
     include_inactive: bool = False,
-    current_user=Depends(get_current_user)
+    current_user=Depends(check_permission("products", "view"))
 ):
     """List products with filtering, sorting, and pagination."""
     try:
@@ -272,7 +276,7 @@ async def list_products(
 @router.get("/{product_id}", response_model=ProductResponse)
 async def get_product(
     product_id: str,
-    current_user=Depends(get_current_user)
+    current_user=Depends(check_permission("products", "view"))
 ):
     """Get a single product by ID."""
     try:
@@ -310,7 +314,7 @@ async def get_product(
 @router.get("/slug/{slug}", response_model=ProductResponse)
 async def get_product_by_slug(
     slug: str,
-    current_user=Depends(get_current_user)
+    current_user=Depends(check_permission("products", "view"))
 ):
     """Get a single product by slug."""
     try:
@@ -348,7 +352,7 @@ async def get_product_by_slug(
 @router.post("", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 async def create_product(
     product_data: ProductCreate,
-    current_admin=Depends(get_current_admin)
+    current_user=Depends(check_permission("products", "edit"))
 ):
     """Create a new product (admin only). Optimized for performance."""
     import asyncio
@@ -392,6 +396,8 @@ async def create_product(
                 "metaDescription": product_data.meta_description,
                 "isFeatured": product_data.is_featured,
                 "hasVariants": product_data.has_variants,
+                "isNew": product_data.is_new,
+                "newUntil": product_data.new_until,
             }
         )
         
@@ -472,7 +478,7 @@ async def create_product(
 async def update_product(
     product_id: str,
     product_data: ProductUpdate,
-    current_admin=Depends(get_current_admin)
+    current_user=Depends(check_permission("products", "edit"))
 ):
     """Update an existing product (admin only). Optimized for performance."""
     import asyncio
@@ -521,6 +527,8 @@ async def update_product(
             "meta_description": "metaDescription",
             "is_featured": "isFeatured",
             "has_variants": "hasVariants",
+            "is_new": "isNew",
+            "new_until": "newUntil",
         }
         
         for py_field, db_field in field_mappings.items():
@@ -738,7 +746,7 @@ async def update_product(
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_product(
     product_id: str,
-    current_admin=Depends(get_current_admin)
+    current_user=Depends(check_permission("products", "edit"))
 ):
     """Delete a product (admin only). Optimized for performance."""
     import asyncio
@@ -780,7 +788,7 @@ async def delete_product(
 @router.post("/bulk/status", response_model=BulkOperationResponse)
 async def bulk_update_status(
     data: ProductBulkStatusUpdate,
-    current_admin=Depends(get_current_admin)
+    current_user=Depends(check_permission("products", "edit"))
 ):
     """Bulk update product status (admin only)."""
     try:
@@ -808,7 +816,7 @@ async def bulk_update_status(
 @router.post("/bulk/delete", response_model=BulkOperationResponse)
 async def bulk_delete_products(
     data: ProductBulkDelete,
-    current_admin=Depends(get_current_admin)
+    current_user=Depends(check_permission("products", "edit"))
 ):
     """Bulk delete products (admin only). Optimized for performance."""
     import asyncio
@@ -845,7 +853,7 @@ async def get_category_attributes(
     category_id: str,
     include_inherited: bool = True,
     include_inactive: bool = False,
-    current_user=Depends(get_current_user)
+    current_user=Depends(check_permission("products", "view"))
 ):
     """Get attributes for a category (and inherited from parents)."""
     try:

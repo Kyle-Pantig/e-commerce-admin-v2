@@ -13,14 +13,14 @@ from typing import Optional
 import asyncio
 
 from prisma_client import get_prisma_client
-from routers.auth import get_current_user
+from routers.auth import get_current_user, check_permission
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 
 @router.get("/dashboard")
 async def get_dashboard_analytics(
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("analytics", "view"))
 ):
     """Get comprehensive dashboard analytics"""
     prisma = await get_prisma_client()
@@ -118,10 +118,10 @@ async def get_dashboard_analytics(
         # Out of stock variants
         prisma.productvariant.count(where={"isActive": True, "stock": 0, "product": {"status": "ACTIVE"}}),
         
-        # Customers (users with USER role - regular customers)
-        prisma.user.count(where={"role": "USER"}),
-        prisma.user.count(where={"role": "USER", "createdAt": {"gte": today.replace(day=1)}}),
-        prisma.user.count(where={"role": "USER", "createdAt": {"gte": last_month_start, "lt": today.replace(day=1)}}),
+        # Customers (users with CUSTOMER role - regular customers)
+        prisma.user.count(where={"role": "CUSTOMER"}),
+        prisma.user.count(where={"role": "CUSTOMER", "createdAt": {"gte": today.replace(day=1)}}),
+        prisma.user.count(where={"role": "CUSTOMER", "createdAt": {"gte": last_month_start, "lt": today.replace(day=1)}}),
         
         # Categories
         prisma.category.count(),
@@ -187,7 +187,7 @@ async def get_dashboard_analytics(
 @router.get("/sales-chart")
 async def get_sales_chart_data(
     period: str = "30d",  # 7d, 30d, 90d
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("analytics", "view"))
 ):
     """Get sales data for chart visualization"""
     prisma = await get_prisma_client()
@@ -232,7 +232,7 @@ async def get_sales_chart_data(
 @router.get("/top-products")
 async def get_top_products(
     limit: int = 5,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("analytics", "view"))
 ):
     """Get top selling products based on order items"""
     prisma = await get_prisma_client()
@@ -292,7 +292,7 @@ async def get_top_products(
 async def get_low_stock_products(
     threshold: int = 10,
     limit: int = 10,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("analytics", "view"))
 ):
     """Get products and variants with low stock"""
     prisma = await get_prisma_client()
@@ -385,7 +385,7 @@ async def get_low_stock_products(
 @router.get("/recent-orders")
 async def get_recent_orders(
     limit: int = 5,
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("analytics", "view"))
 ):
     """Get most recent orders"""
     prisma = await get_prisma_client()
@@ -413,7 +413,7 @@ async def get_recent_orders(
 
 @router.get("/order-status-distribution")
 async def get_order_status_distribution(
-    current_user = Depends(get_current_user)
+    current_user = Depends(check_permission("analytics", "view"))
 ):
     """Get order count by status for pie/donut chart"""
     prisma = await get_prisma_client()

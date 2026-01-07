@@ -9,7 +9,7 @@
  */
 
 import { apiClient } from "../client"
-import type { User, UserUpdate, AuthUser, AuthResponse } from "../types"
+import type { User, UserUpdate, UserCreate, AuthUser, AuthResponse } from "../types"
 
 // =============================================================================
 // API Service
@@ -31,9 +31,17 @@ export const usersApi = {
   },
 
   /**
-   * Update user approval status
+   * Create a new user (admin only)
+   * @param data - User creation data
+   */
+  create: (data: UserCreate): Promise<User> => {
+    return apiClient.post<User>("/auth/users", data)
+  },
+
+  /**
+   * Update user approval status, role, and permissions
    * @param id - User ID
-   * @param data - Update data (is_approved, role)
+   * @param data - Update data (is_approved, role, permissions)
    */
   updateApproval: (id: string, data: UserUpdate): Promise<User> => {
     return apiClient.patch<User>(`/auth/users/${id}/approval`, data)

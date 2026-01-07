@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation"
 import { GalleryVerticalEnd } from "lucide-react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -70,14 +69,11 @@ export function LoginForm({
       router.push("/dashboard")
       router.refresh()
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Login failed. Please try again."
+      let errorMessage = "Invalid email or password"
       
-      // Check if it's an approval error (403)
+      // Only show specific message for approval pending (403)
       if (err instanceof ApiClientError && err.status === 403) {
-        toast.error("Account Pending Approval", {
-          description: errorMessage,
-          duration: 5000,
-        })
+        errorMessage = err.message || "Your account is pending approval."
       }
       
       setFormError("root", {

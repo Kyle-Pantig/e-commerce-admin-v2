@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/app-layout"
 import { useEffect, useState } from "react"
 import type { UserData } from "@/lib/auth"
 import { LoadingState } from "@/components/ui/loading-state"
+import { NoAccess } from "@/components/shared"
 
 // Import shared API services and types
 import { productsApi } from "@/lib/api/services/products"
@@ -20,6 +21,7 @@ export default function NewProductPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
   const [user, setUser] = useState<UserData | null>(null)
+  const [canEdit, setCanEdit] = useState<boolean | null>(null)
 
   useEffect(() => {
     const loadUser = async () => {
@@ -28,6 +30,14 @@ export default function NewProductPage() {
       if (authUser) {
         try {
           const userInfo = await usersApi.me()
+          const role = userInfo.role
+          const permissions = userInfo.permissions
+          
+          // Check edit permission
+          const hasEditPermission = role === "ADMIN" || 
+            (role === "STAFF" && permissions?.products === "edit")
+          setCanEdit(hasEditPermission)
+          
           setUser({
             id: authUser.id,
             email: authUser.email || "",
@@ -35,8 +45,10 @@ export default function NewProductPage() {
             avatar: authUser.user_metadata?.avatar_url,
             role: userInfo.role || undefined,
             isApproved: userInfo.is_approved || undefined,
+            permissions: userInfo.permissions || undefined,
           })
         } catch (error) {
+          setCanEdit(false)
           setUser({
             id: authUser.id,
             email: authUser.email || "",
@@ -72,6 +84,18 @@ export default function NewProductPage() {
     },
   })
 
+  // If permission check is complete and user doesn't have edit permission
+  if (canEdit === false) {
+    return (
+      <AppLayout user={user} title="Access Denied" description="Create Product">
+        <NoAccess 
+          module="Products" 
+          description="You don't have permission to create products. Contact your administrator for access."
+        />
+      </AppLayout>
+    )
+  }
+
   return (
     <AppLayout
       user={user}
@@ -80,7 +104,7 @@ export default function NewProductPage() {
     >
       <div className="px-4 lg:px-6 w-full">
         <div className="w-full">
-          {!user ? (
+          {!user || canEdit === null ? (
             <LoadingState variant="centered" text="Initializing editor..." />
           ) : (
             <ProductForm

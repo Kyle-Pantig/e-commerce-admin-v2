@@ -18,9 +18,13 @@ export default async function LoginPage({
   }
 
   const params = await searchParams
-  const errorMessage = params.error === "pending_approval" 
-    ? "Your account is pending admin approval. Please wait for approval before signing in." 
-    : undefined
+  let errorMessage: string | undefined
+  
+  if (params.error === "pending_approval") {
+    errorMessage = "Your account is pending approval. Please wait for approval before signing in."
+  } else if (params.error === "session_expired") {
+    errorMessage = "Your session has expired. Please sign in again."
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">

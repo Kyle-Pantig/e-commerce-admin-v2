@@ -196,6 +196,8 @@ export interface Product {
   meta_description: string | null
   is_featured: boolean
   has_variants: boolean
+  is_new: boolean
+  new_until: string | null
   images: ProductImage[] | null
   variants: ProductVariant[] | null
   attribute_values: ProductAttributeValue[] | null
@@ -216,6 +218,8 @@ export interface ProductListItem {
   category_name: string | null
   is_featured: boolean
   has_variants: boolean
+  is_new: boolean
+  new_until: string | null
   primary_image: string | null
   variants: { id: string; stock: number; is_active: boolean }[] | null
   created_at: string
@@ -267,6 +271,8 @@ export interface ProductCreate {
   meta_description?: string | null
   is_featured?: boolean
   has_variants?: boolean
+  is_new?: boolean
+  new_until?: string | null
   images?: ProductImageCreate[]
   variants?: ProductVariantCreate[]
   attribute_values?: ProductAttributeValueCreate[]
@@ -291,7 +297,52 @@ export interface ProductListParams extends PaginationParams {
 // User Types
 // =============================================================================
 
-export type UserRole = "USER" | "ADMIN"
+export type UserRole = "ADMIN" | "STAFF" | "CUSTOMER"
+
+export type PermissionLevel = "none" | "view" | "edit"
+
+export type PermissionModule = 
+  | "products" 
+  | "orders" 
+  | "inventory" 
+  | "categories" 
+  | "attributes" 
+  | "analytics" 
+  | "users"
+
+export type StaffPermissions = {
+  [K in PermissionModule]?: PermissionLevel
+}
+
+export const DEFAULT_STAFF_PERMISSIONS: StaffPermissions = {
+  products: "view",
+  orders: "view",
+  inventory: "view",
+  categories: "view",
+  attributes: "view",
+  analytics: "view",
+  users: "none",
+}
+
+export const PERMISSION_MODULES: PermissionModule[] = [
+  "products",
+  "orders",
+  "inventory",
+  "categories",
+  "attributes",
+  "analytics",
+  "users",
+]
+
+export const PERMISSION_LABELS: Record<PermissionModule, string> = {
+  products: "Products",
+  orders: "Orders",
+  inventory: "Inventory",
+  categories: "Categories",
+  attributes: "Attributes",
+  analytics: "Analytics",
+  users: "Users",
+}
 
 export interface User {
   id: string
@@ -300,11 +351,22 @@ export interface User {
   role: UserRole
   is_approved: boolean
   created_at: string | null
+  permissions?: StaffPermissions | null
 }
 
 export interface UserUpdate {
   is_approved?: boolean
   role?: UserRole
+  permissions?: StaffPermissions
+}
+
+export interface UserCreate {
+  email: string
+  password: string
+  full_name?: string
+  role?: UserRole
+  is_approved?: boolean
+  permissions?: StaffPermissions
 }
 
 // =============================================================================
@@ -319,6 +381,7 @@ export interface AuthUser {
   is_approved: boolean | null
   user_metadata?: Record<string, unknown>
   created_at: string | null
+  permissions?: StaffPermissions | null
 }
 
 export interface AuthResponse {

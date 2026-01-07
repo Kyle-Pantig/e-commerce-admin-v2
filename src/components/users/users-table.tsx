@@ -51,14 +51,25 @@ import { IconDots, IconCheck, IconTrash, IconArrowUp, IconArrowDown, IconArrowsS
 
 // Import shared API services and types
 import { usersApi } from "@/lib/api/services/users"
-import type { User, UserRole } from "@/lib/api/types"
+import type { User, UserRole, StaffPermissions, PermissionModule, PermissionLevel } from "@/lib/api/types"
+import { DEFAULT_STAFF_PERMISSIONS, PERMISSION_MODULES, PERMISSION_LABELS } from "@/lib/api/types"
+import { Switch } from "@/components/ui/switch"
 
 interface UsersTableProps {
   currentUserRole?: string
+  canEdit?: boolean
 }
 
-export function UsersTable({ currentUserRole }: UsersTableProps) {
+// Role display config
+const ROLE_CONFIG: Record<UserRole, { label: string; variant: "default" | "secondary" | "outline" }> = {
+  ADMIN: { label: "Admin", variant: "default" },
+  STAFF: { label: "Staff", variant: "secondary" },
+  CUSTOMER: { label: "Customer", variant: "outline" },
+}
+
+export function UsersTable({ currentUserRole, canEdit = true }: UsersTableProps) {
   const isAdmin = currentUserRole?.toUpperCase() === "ADMIN"
+  const hasEditPermission = isAdmin && canEdit
   const router = useRouter()
   const queryClient = useQueryClient()
   const [approveDialogOpen, setApproveDialogOpen] = useState(false)
@@ -66,7 +77,8 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
-  const [selectedRole, setSelectedRole] = useState<UserRole>("USER")
+  const [selectedRole, setSelectedRole] = useState<UserRole>("CUSTOMER")
+  const [selectedPermissions, setSelectedPermissions] = useState<StaffPermissions>(DEFAULT_STAFF_PERMISSIONS)
   const [sorting, setSorting] = useState<SortingState>([])
 
   // React Query: Fetch users using shared API service
@@ -82,13 +94,18 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
 
   // React Query: Approve user mutation
   const approveMutation = useMutation({
-    mutationFn: ({ userId, role }: { userId: string; role: UserRole }) =>
-      usersApi.updateApproval(userId, { is_approved: true, role }),
+    mutationFn: ({ userId, role, permissions }: { userId: string; role: UserRole; permissions?: StaffPermissions }) =>
+      usersApi.updateApproval(userId, { 
+        is_approved: true, 
+        role,
+        permissions: role === "STAFF" ? permissions : undefined
+      }),
     onSuccess: (_, variables) => {
-      toast.success(`User approved as ${variables.role} successfully`)
+      toast.success(`User approved as ${ROLE_CONFIG[variables.role].label} successfully`)
       queryClient.invalidateQueries({ queryKey: ["users"] })
       setApproveDialogOpen(false)
       setSelectedUserId(null)
+      setSelectedPermissions(DEFAULT_STAFF_PERMISSIONS)
     },
     onError: (error: Error) => {
       toast.error(error.message || "Failed to approve user")
@@ -97,13 +114,17 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
 
   // React Query: Update role mutation
   const updateRoleMutation = useMutation({
-    mutationFn: ({ userId, role }: { userId: string; role: UserRole }) =>
-      usersApi.updateApproval(userId, { role }),
+    mutationFn: ({ userId, role, permissions }: { userId: string; role: UserRole; permissions?: StaffPermissions }) =>
+      usersApi.updateApproval(userId, { 
+        role,
+        permissions: role === "STAFF" ? permissions : undefined
+      }),
     onSuccess: (_, variables) => {
-      toast.success(`User role updated to ${variables.role} successfully`)
+      toast.success(`User role updated to ${ROLE_CONFIG[variables.role].label} successfully`)
       queryClient.invalidateQueries({ queryKey: ["users"] })
       setUpdateRoleDialogOpen(false)
       setSelectedUserId(null)
+      setSelectedPermissions(DEFAULT_STAFF_PERMISSIONS)
     },
     onError: (error: Error) => {
       toast.error(error.message || "Failed to update user role")
@@ -128,25 +149,42 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
   const openApproveDialog = (userId: string) => {
     const user = users.find((u: User) => u.id === userId)
     setSelectedUserId(userId)
-    setSelectedRole(user?.role === "ADMIN" ? "ADMIN" : "USER")
+    setSelectedRole(user?.role || "CUSTOMER")
+    setSelectedPermissions(user?.permissions || DEFAULT_STAFF_PERMISSIONS)
     setApproveDialogOpen(true)
   }
 
   const handleApprove = () => {
     if (!selectedUserId) return
-    approveMutation.mutate({ userId: selectedUserId, role: selectedRole })
+    approveMutation.mutate({ 
+      userId: selectedUserId, 
+      role: selectedRole,
+      permissions: selectedRole === "STAFF" ? selectedPermissions : undefined
+    })
   }
 
   const openUpdateRoleDialog = (userId: string) => {
     const user = users.find((u: User) => u.id === userId)
     setSelectedUserId(userId)
-    setSelectedRole(user?.role === "ADMIN" ? "ADMIN" : "USER")
+    setSelectedRole(user?.role || "CUSTOMER")
+    setSelectedPermissions(user?.permissions || DEFAULT_STAFF_PERMISSIONS)
     setUpdateRoleDialogOpen(true)
   }
 
   const handleUpdateRole = () => {
     if (!selectedUserId) return
-    updateRoleMutation.mutate({ userId: selectedUserId, role: selectedRole })
+    updateRoleMutation.mutate({ 
+      userId: selectedUserId, 
+      role: selectedRole,
+      permissions: selectedRole === "STAFF" ? selectedPermissions : undefined
+    })
+  }
+
+  const handlePermissionChange = (module: PermissionModule, level: PermissionLevel) => {
+    setSelectedPermissions(prev => ({
+      ...prev,
+      [module]: level
+    }))
   }
 
   const handleDelete = (userId: string) => {
@@ -257,11 +295,15 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
           </Button>
         )
       },
-      cell: ({ row }) => (
-        <Badge variant={row.original.role === "ADMIN" ? "default" : "secondary"}>
-          {row.original.role}
-        </Badge>
-      ),
+      cell: ({ row }) => {
+        const role = row.original.role
+        const config = ROLE_CONFIG[role] || ROLE_CONFIG.CUSTOMER
+        return (
+          <Badge variant={config.variant}>
+            {config.label}
+          </Badge>
+        )
+      },
     },
     {
       accessorKey: "is_approved",
@@ -315,7 +357,7 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
         </div>
       ),
     },
-    ...(isAdmin
+    ...(hasEditPermission
       ? [
           {
             id: "actions",
@@ -465,7 +507,7 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={isAdmin ? 6 : 5}
+                    colSpan={hasEditPermission ? 6 : 5}
                     className="text-center text-muted-foreground py-8"
                   >
                     No users found
@@ -480,7 +522,7 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
 
       {/* Approve Dialog */}
       <Dialog open={approveDialogOpen} onOpenChange={setApproveDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Approve User</DialogTitle>
             <DialogDescription>
@@ -492,17 +534,48 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
               <Label htmlFor="role">User Role</Label>
               <Select
                 value={selectedRole}
-                onValueChange={(value: "USER" | "ADMIN") => setSelectedRole(value)}
+                onValueChange={(value: UserRole) => setSelectedRole(value)}
               >
                 <SelectTrigger id="role">
                   <SelectValue placeholder="Select a role" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="USER">USER</SelectItem>
-                  <SelectItem value="ADMIN">ADMIN</SelectItem>
+                  <SelectItem value="ADMIN">Admin - Full access</SelectItem>
+                  <SelectItem value="STAFF">Staff - Controlled permissions</SelectItem>
+                  <SelectItem value="CUSTOMER">Customer - E-commerce user</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Staff Permissions Editor */}
+            {selectedRole === "STAFF" && (
+              <div className="grid gap-3 pt-2">
+                <Label className="text-sm font-medium">Staff Permissions</Label>
+                <div className="rounded-md border p-3 space-y-3">
+                  {PERMISSION_MODULES.map((module) => (
+                    <div key={module} className="flex items-center justify-between">
+                      <span className="text-sm">{PERMISSION_LABELS[module]}</span>
+                      <Select
+                        value={selectedPermissions[module] || "view"}
+                        onValueChange={(value: PermissionLevel) => handlePermissionChange(module, value)}
+                      >
+                        <SelectTrigger className="w-24 h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="view">View</SelectItem>
+                          {module !== "users" && <SelectItem value="edit">Edit</SelectItem>}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Staff can never edit users - only admins can manage user accounts.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -510,6 +583,7 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
               onClick={() => {
                 setApproveDialogOpen(false)
                 setSelectedUserId(null)
+                setSelectedPermissions(DEFAULT_STAFF_PERMISSIONS)
               }}
             >
               Cancel
@@ -526,7 +600,7 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
 
       {/* Update Role Dialog */}
       <Dialog open={updateRoleDialogOpen} onOpenChange={setUpdateRoleDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Update User Role</DialogTitle>
             <DialogDescription>
@@ -538,17 +612,48 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
               <Label htmlFor="update-role">User Role</Label>
               <Select
                 value={selectedRole}
-                onValueChange={(value: "USER" | "ADMIN") => setSelectedRole(value)}
+                onValueChange={(value: UserRole) => setSelectedRole(value)}
               >
                 <SelectTrigger id="update-role">
                   <SelectValue placeholder="Select a role" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="USER">USER</SelectItem>
-                  <SelectItem value="ADMIN">ADMIN</SelectItem>
+                  <SelectItem value="ADMIN">Admin - Full access</SelectItem>
+                  <SelectItem value="STAFF">Staff - Controlled permissions</SelectItem>
+                  <SelectItem value="CUSTOMER">Customer - E-commerce user</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Staff Permissions Editor */}
+            {selectedRole === "STAFF" && (
+              <div className="grid gap-3 pt-2">
+                <Label className="text-sm font-medium">Staff Permissions</Label>
+                <div className="rounded-md border p-3 space-y-3">
+                  {PERMISSION_MODULES.map((module) => (
+                    <div key={module} className="flex items-center justify-between">
+                      <span className="text-sm">{PERMISSION_LABELS[module]}</span>
+                      <Select
+                        value={selectedPermissions[module] || "view"}
+                        onValueChange={(value: PermissionLevel) => handlePermissionChange(module, value)}
+                      >
+                        <SelectTrigger className="w-24 h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="view">View</SelectItem>
+                          {module !== "users" && <SelectItem value="edit">Edit</SelectItem>}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Staff can never edit users - only admins can manage user accounts.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -556,6 +661,7 @@ export function UsersTable({ currentUserRole }: UsersTableProps) {
               onClick={() => {
                 setUpdateRoleDialogOpen(false)
                 setSelectedUserId(null)
+                setSelectedPermissions(DEFAULT_STAFF_PERMISSIONS)
               }}
             >
               Cancel

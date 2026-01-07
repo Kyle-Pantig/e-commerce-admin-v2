@@ -13,5 +13,7 @@ export type { PaginationProps } from "./pagination"
 export { ImageCropModal } from "./image-crop-modal"
 export type { ImageCropModalProps } from "./image-crop-modal"
 
+export { NoAccess } from "./no-access"
+
 
 

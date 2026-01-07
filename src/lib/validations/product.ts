@@ -77,6 +77,8 @@ export const productSchema = z.object({
   // Flags
   is_featured: z.boolean(),
   has_variants: z.boolean(),
+  is_new: z.boolean(),
+  new_until: z.string().optional().nullable(),
   
   // Nested data
   images: z.array(productImageSchema).optional(),

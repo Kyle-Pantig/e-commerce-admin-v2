@@ -37,45 +37,56 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import type { UserData } from "@/lib/auth"
+import type { PermissionModule, StaffPermissions, UserRole } from "@/lib/api/types"
+
+// Define nav items with their permission requirements
+const allNavItems = [
+  {
+    title: "Dashboard",
+    url: "/dashboard",
+    icon: IconDashboard,
+    permission: "analytics" as PermissionModule, // Dashboard shows analytics
+  },
+  {
+    title: "Categories",
+    url: "/categories",
+    icon: IconFolder,
+    permission: "categories" as PermissionModule,
+  },
+  {
+    title: "Attributes",
+    url: "/attributes",
+    icon: IconTags,
+    permission: "attributes" as PermissionModule,
+  },
+  {
+    title: "Products",
+    url: "/products",
+    icon: IconPackage,
+    permission: "products" as PermissionModule,
+  },
+  {
+    title: "Orders",
+    url: "/orders",
+    icon: IconReceipt,
+    permission: "orders" as PermissionModule,
+  },
+  {
+    title: "Inventory",
+    url: "/inventory",
+    icon: IconPackages,
+    permission: "inventory" as PermissionModule,
+  },
+  {
+    title: "Users",
+    url: "/users",
+    icon: IconUsers,
+    permission: "users" as PermissionModule,
+    adminOnly: true, // Users management is admin-only
+  },
+]
 
 const data = {
-  navMain: [
-    {
-      title: "Dashboard",
-      url: "/dashboard",
-      icon: IconDashboard,
-    },
-    {
-      title: "Categories",
-      url: "/categories",
-      icon: IconFolder,
-    },
-    {
-      title: "Attributes",
-      url: "/attributes",
-      icon: IconTags,
-    },
-    {
-      title: "Products",
-      url: "/products",
-      icon: IconPackage,
-    },
-    {
-      title: "Orders",
-      url: "/orders",
-      icon: IconReceipt,
-    },
-    {
-      title: "Inventory",
-      url: "/inventory",
-      icon: IconPackages,
-    },
-    {
-      title: "Users",
-      url: "/users",
-      icon: IconUsers,
-    },
-  ],
   navClouds: [
     {
       title: "Capture",
@@ -160,6 +171,34 @@ const data = {
   ],
 }
 
+// Helper function to check if user has permission for a module
+function hasPermission(
+  role: UserRole | undefined,
+  permissions: StaffPermissions | undefined,
+  module: PermissionModule,
+  adminOnly?: boolean
+): boolean {
+  // If no role, deny access
+  if (!role) return false
+  
+  // Admin has access to everything
+  if (role === "ADMIN") return true
+  
+  // Admin-only items are not accessible to other roles
+  if (adminOnly) return false
+  
+  // Customer has no access to admin features
+  if (role === "CUSTOMER") return false
+  
+  // Staff - check specific permissions
+  if (role === "STAFF") {
+    const level = permissions?.[module] || "none"
+    return level !== "none"
+  }
+  
+  return false
+}
+
 export function AppSidebar({ 
   user,
   ...props 
@@ -170,8 +209,15 @@ export function AppSidebar({
     avatar: user?.avatar || undefined,
   }
 
-  // Show all nav items to all users (Users tab is visible to all, but actions are restricted based on role)
-  const navItems = data.navMain
+  // Filter nav items based on user permissions
+  const navItems = React.useMemo(() => {
+    const role = user?.role as UserRole | undefined
+    const permissions = user?.permissions as StaffPermissions | undefined
+    
+    return allNavItems
+      .filter(item => hasPermission(role, permissions, item.permission, item.adminOnly))
+      .map(({ title, url, icon }) => ({ title, url, icon }))
+  }, [user?.role, user?.permissions])
 
   return (
     <Sidebar collapsible="offcanvas" {...props}>

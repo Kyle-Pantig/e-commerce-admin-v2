@@ -41,10 +41,12 @@ import type { Attribute, AttributeCreate, AttributeUpdate, Category } from "@/li
 
 interface AttributesTableProps {
   currentUserRole?: string
+  canEdit?: boolean
 }
 
-export function AttributesTable({ currentUserRole }: AttributesTableProps) {
+export function AttributesTable({ currentUserRole, canEdit = true }: AttributesTableProps) {
   const isAdmin = currentUserRole?.toUpperCase() === "ADMIN"
+  const hasEditPermission = isAdmin || canEdit
   const router = useRouter()
   const queryClient = useQueryClient()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -375,7 +377,7 @@ export function AttributesTable({ currentUserRole }: AttributesTableProps) {
                   <TableHead>Order</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
-                  {isAdmin && <TableHead className="w-[100px]">Actions</TableHead>}
+                  {hasEditPermission && <TableHead className="w-[100px]">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -402,7 +404,7 @@ export function AttributesTable({ currentUserRole }: AttributesTableProps) {
                     <TableCell>
                       <Skeleton className="h-4 w-24" />
                     </TableCell>
-                    {isAdmin && (
+                    {hasEditPermission && (
                       <TableCell>
                         <Skeleton className="h-8 w-8" />
                       </TableCell>
@@ -420,7 +422,7 @@ export function AttributesTable({ currentUserRole }: AttributesTableProps) {
 
   return (
     <div className="px-4 lg:px-6">
-      {isAdmin && (
+      {hasEditPermission && (
         <div className="mb-4 flex justify-end">
           <Button onClick={() => setCreateDialogOpen(true)}>
             <IconPlus className="mr-2 h-4 w-4" />
@@ -458,7 +460,7 @@ export function AttributesTable({ currentUserRole }: AttributesTableProps) {
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={isAdmin ? 8 : 7}
+                    colSpan={hasEditPermission ? 8 : 7}
                     className="text-center text-muted-foreground py-8"
                   >
                     No attributes found

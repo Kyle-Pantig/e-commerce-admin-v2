@@ -12,21 +12,34 @@ datasource db {
 }
 
 enum UserRole {
-  USER
-  ADMIN
+  ADMIN      // Full access to everything
+  STAFF      // Controlled permissions (can be edit or read-only per module)
+  CUSTOMER   // E-commerce customer (can only access their own data)
+}
+
+// Permission levels for STAFF role
+enum PermissionLevel {
+  NONE   // No access
+  VIEW   // Read-only access
+  EDIT   // Full CRUD access
 }
 
 model User {
-  id         String   @id @default(uuid())
-  email      String   @unique
-  fullName   String?  @map("full_name")
-  role       UserRole @default(USER)
-  isApproved Boolean  @default(false) @map("is_approved")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(uuid())
+  email       String   @unique
+  fullName    String?  @map("full_name")
+  role        UserRole @default(CUSTOMER)
+  isApproved  Boolean  @default(false) @map("is_approved")
+  
+  // Staff permissions (stored as JSON for flexibility)
+  // Format: {"products": "edit", "orders": "view", "inventory": "none", ...}
+  permissions Json?
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   // Relations
-  orders     Order[]
+  orders      Order[]
 
   // Performance indexes
   @@index([isApproved])                    // Approval status filtering
@@ -190,6 +203,8 @@ model Product {
   // Flags
   isFeatured      Boolean        @default(false) @map("is_featured")
   hasVariants     Boolean        @default(false) @map("has_variants")
+  isNew           Boolean        @default(true) @map("is_new")
+  newUntil        DateTime?      @map("new_until") // Auto-expire "new" status after this date
   
   // Timestamps
   createdAt       DateTime       @default(now()) @map("created_at")
@@ -205,8 +220,10 @@ model Product {
   @@index([categoryId])
   @@index([status])
   @@index([isFeatured])
+  @@index([isNew])                         // New products filtering
   @@index([createdAt])
   @@index([status, isFeatured])
+  @@index([status, isNew])                 // Active new products
   @@index([categoryId, status])
   @@index([basePrice])                     // Price range filtering
   @@index([stock])                         // Stock availability filtering
