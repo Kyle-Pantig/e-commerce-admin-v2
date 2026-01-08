@@ -275,10 +275,15 @@ class ProductResponse(BaseModel):
 
 
 class ProductVariantListItem(BaseModel):
-    """Minimal variant data for product list (stock calculation)."""
+    """Variant data for product list (includes name, options for display)."""
     id: str
+    name: str
+    sku: Optional[str] = None
+    price: Optional[float] = None
+    sale_price: Optional[float] = None
     stock: int
     is_active: bool
+    options: Optional[Dict[str, Any]] = None  # e.g., {"Size": "L", "Color": "Red"}
 
     class Config:
         from_attributes = True

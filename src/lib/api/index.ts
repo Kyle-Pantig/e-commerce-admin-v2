@@ -71,6 +71,18 @@ export type {
   QuickUpdateResponse,
 } from "./services/inventory"
 
+export { discountsApi } from "./services/discounts"
+export type {
+  DiscountType,
+  DiscountCode,
+  DiscountCodeCreate,
+  DiscountCodeUpdate,
+  DiscountCodeListParams,
+  DiscountCodeListResponse,
+  DiscountValidationRequest,
+  DiscountValidationResponse,
+} from "./services/discounts"
+
 // =============================================================================
 // Types - Re-export all types for convenience
 // =============================================================================

@@ -13,15 +13,7 @@ import {
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { analyticsApi, type DashboardAnalytics } from "@/lib/api/services/analytics"
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
+import { formatPrice } from "@/lib/utils"
 
 function formatNumber(num: number): string {
   if (num >= 1000000) {
@@ -71,9 +63,9 @@ export function DashboardStats() {
   const stats = [
     {
       title: "Total Revenue",
-      value: formatCurrency(data.revenue.this_month),
+      value: formatPrice(data.revenue.this_month, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
       change: data.revenue.growth_percent,
-      description: `${formatCurrency(data.revenue.today)} today`,
+      description: `${formatPrice(data.revenue.today, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} today`,
       subtext: "Revenue this month",
       icon: IconCurrencyDollar,
     },

@@ -221,7 +221,16 @@ export interface ProductListItem {
   is_new: boolean
   new_until: string | null
   primary_image: string | null
-  variants: { id: string; stock: number; is_active: boolean }[] | null
+  variants: {
+    id: string
+    name: string
+    sku: string | null
+    price: number | null
+    sale_price: number | null
+    stock: number
+    is_active: boolean
+    options: Record<string, string> | null
+  }[] | null
   created_at: string
   updated_at: string
 }
@@ -551,6 +560,7 @@ export interface OrderCreate {
   shipping_cost?: number
   tax_amount?: number
   discount_amount?: number
+  discount_code_id?: string | null
   
   notes?: string | null
   internal_notes?: string | null

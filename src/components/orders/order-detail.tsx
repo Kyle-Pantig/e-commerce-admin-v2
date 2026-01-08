@@ -51,6 +51,7 @@ import Image from "next/image"
 
 import { ordersApi } from "@/lib/api/services/orders"
 import type { Order, OrderStatus, PaymentStatus } from "@/lib/api/types"
+import { formatPrice } from "@/lib/utils"
 
 interface OrderDetailProps {
   orderNumber: string
@@ -233,10 +234,10 @@ export function OrderDetail({ orderNumber, currentUserRole }: OrderDetailProps) 
                   </div>
                   <div className="text-right">
                     <p className="font-bold text-lg">
-                      ₱{item.subtotal.toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                      {formatPrice(item.subtotal)}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {item.quantity} × ₱{item.unit_price.toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                      {item.quantity} × {formatPrice(item.unit_price)}
                     </p>
                   </div>
                 </div>
@@ -248,26 +249,26 @@ export function OrderDetail({ orderNumber, currentUserRole }: OrderDetailProps) 
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span className="font-medium">₱{order.subtotal.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</span>
+                  <span className="font-medium">{formatPrice(order.subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Shipping</span>
-                  <span className="font-medium">₱{order.shipping_cost.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</span>
+                  <span className="font-medium">{formatPrice(order.shipping_cost)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Tax</span>
-                  <span className="font-medium">₱{order.tax_amount.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</span>
+                  <span className="font-medium">{formatPrice(order.tax_amount)}</span>
                 </div>
                 {order.discount_amount > 0 && (
                   <div className="flex justify-between text-sm text-green-600">
                     <span>Discount</span>
-                    <span className="font-medium">-₱{order.discount_amount.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</span>
+                    <span className="font-medium">-{formatPrice(order.discount_amount)}</span>
                   </div>
                 )}
                 <Separator className="my-3" />
                 <div className="flex justify-between font-bold text-xl">
                   <span>Total</span>
-                  <span className="text-primary">₱{order.total.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</span>
+                  <span className="text-primary">{formatPrice(order.total)}</span>
                 </div>
               </div>
             </div>
@@ -361,7 +362,7 @@ export function OrderDetail({ orderNumber, currentUserRole }: OrderDetailProps) 
               
               <div className="flex items-center justify-between pt-2">
                 <span className="font-semibold">Total Amount</span>
-                <span className="text-xl font-bold text-primary">₱{order.total.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</span>
+                <span className="text-xl font-bold text-primary">{formatPrice(order.total)}</span>
               </div>
             </div>
           </FieldSet>

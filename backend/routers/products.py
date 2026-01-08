@@ -160,7 +160,16 @@ def build_product_list_response(product) -> ProductListResponse:
     variants = None
     if product.variants:
         variants = [
-            {"id": v.id, "stock": v.stock, "is_active": v.isActive}
+            {
+                "id": v.id,
+                "name": v.name,
+                "sku": v.sku,
+                "price": v.price,
+                "sale_price": v.salePrice,
+                "stock": v.stock,
+                "is_active": v.isActive,
+                "options": v.options,  # e.g., {"Size": "L", "Color": "Red"}
+            }
             for v in product.variants
         ]
     

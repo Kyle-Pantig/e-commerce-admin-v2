@@ -8,4 +8,6 @@ export * from "./signup"
 export * from "./category"
 export * from "./attribute"
 export * from "./product"
+export * from "./discount"
+export * from "./order"
 

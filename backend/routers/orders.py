@@ -167,11 +167,19 @@ async def create_order(
                 "shippingCost": order_data.shipping_cost,
                 "taxAmount": order_data.tax_amount,
                 "discountAmount": order_data.discount_amount,
+                "discountCodeId": order_data.discount_code_id,
                 "total": total,
                 "notes": order_data.notes,
                 "internalNotes": order_data.internal_notes,
             }
         )
+        
+        # Increment discount code usage count if a code was applied
+        if order_data.discount_code_id:
+            await tx.discountcode.update(
+                where={"id": order_data.discount_code_id},
+                data={"usageCount": {"increment": 1}}
+            )
         
         # Batch create order items - much faster than individual creates
         items_data = []

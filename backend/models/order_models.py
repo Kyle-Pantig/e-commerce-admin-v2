@@ -118,6 +118,7 @@ class OrderCreate(BaseModel):
     shipping_cost: float = 0
     tax_amount: float = 0
     discount_amount: float = 0
+    discount_code_id: Optional[str] = None
     
     # Notes
     notes: Optional[str] = None

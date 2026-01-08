@@ -31,11 +31,55 @@ import {
   IconCheck,
   IconX,
 } from "@tabler/icons-react"
-import { cn } from "@/lib/utils"
+import { cn, formatPrice, formatDiscountBadge } from "@/lib/utils"
 
 // Import shared API services and types
 import { productsApi } from "@/lib/api/services/products"
+import { discountsApi, type DiscountCode } from "@/lib/api/services/discounts"
 import type { Product, ProductImage, ProductVariant, ProductAttributeValue } from "@/lib/api/types"
+
+// Helper to get applicable discount for product/variant
+function getApplicableDiscount(
+  productId: string,
+  variantId: string | null,
+  autoApplyDiscounts: DiscountCode[]
+): DiscountCode | null {
+  for (const discount of autoApplyDiscounts) {
+    const hasProductRestriction = discount.applicable_products && discount.applicable_products.length > 0
+    const hasVariantRestriction = discount.applicable_variants && discount.applicable_variants.length > 0
+    
+    if (hasProductRestriction || hasVariantRestriction) {
+      // Check variant first if provided
+      if (variantId && hasVariantRestriction && discount.applicable_variants?.includes(variantId)) {
+        return discount
+      }
+      // Check product level
+      if (hasProductRestriction && discount.applicable_products?.includes(productId)) {
+        return discount
+      }
+      continue
+    }
+    
+    // No restrictions - applies to all
+    return discount
+  }
+  return null
+}
+
+// Calculate discounted price
+function calculateDiscountedPrice(price: number, discount: DiscountCode | null): number {
+  if (!discount) return price
+  
+  if (discount.discount_type === "PERCENTAGE") {
+    const discountAmount = price * (discount.discount_value / 100)
+    const cappedDiscount = discount.maximum_discount 
+      ? Math.min(discountAmount, discount.maximum_discount)
+      : discountAmount
+    return price - cappedDiscount
+  } else {
+    return Math.max(0, price - discount.discount_value)
+  }
+}
 
 interface ProductViewProps {
   slug: string
@@ -57,6 +101,12 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
     queryKey: ["product", slug],
     queryFn: () => productsApi.getBySlug(slug),
     retry: 1,
+  })
+
+  // Fetch auto-apply discounts
+  const { data: autoApplyDiscounts = [] } = useQuery<DiscountCode[]>({
+    queryKey: ["discounts", "auto-apply"],
+    queryFn: () => discountsApi.getAutoApplyDiscounts(),
   })
 
   // Extract unique option keys and values from variants
@@ -135,13 +185,28 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
     }) || null
   }, [product?.variants, selectedOptions, allOptionsSelected])
 
-  // Get current price and stock
-  const currentPrice = useMemo(() => {
+  // Get applicable discount for current product/variant
+  const applicableDiscount = useMemo(() => {
+    if (!product) return null
+    return getApplicableDiscount(
+      product.id, 
+      matchingVariant?.id || null, 
+      autoApplyDiscounts
+    )
+  }, [product, matchingVariant, autoApplyDiscounts])
+
+  // Get current price and stock (with discount applied)
+  const basePrice = useMemo(() => {
     if (matchingVariant) {
       return matchingVariant.sale_price || matchingVariant.price || product?.sale_price || product?.base_price || 0
     }
     return product?.sale_price || product?.base_price || 0
   }, [matchingVariant, product])
+
+  // Price after auto-apply discount
+  const currentPrice = useMemo(() => {
+    return calculateDiscountedPrice(basePrice, applicableDiscount)
+  }, [basePrice, applicableDiscount])
 
   const originalPrice = useMemo(() => {
     if (matchingVariant?.price) {
@@ -160,14 +225,9 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
     return product?.stock || 0
   }, [matchingVariant, product])
 
-  const isOnSale = currentPrice < originalPrice
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(price)
-  }
+  // Has sale price or auto-apply discount
+  const isOnSale = currentPrice < originalPrice || !!applicableDiscount
+  const hasAutoDiscount = !!applicableDiscount
 
   const handleOptionChange = (optionKey: string, value: string) => {
     setSelectedOptions(prev => {
@@ -287,10 +347,13 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
               </div>
             )}
             
-            {/* Sale Badge */}
+            {/* Sale/Discount Badge */}
             {isOnSale && (
               <Badge className="absolute top-4 left-4 bg-red-500 text-white text-sm px-3 py-1">
-                SALE
+                {hasAutoDiscount && applicableDiscount
+                  ? formatDiscountBadge(applicableDiscount.discount_value, applicableDiscount.discount_type as "PERCENTAGE" | "FIXED_AMOUNT")
+                  : "SALE"
+                }
               </Badge>
             )}
             
@@ -354,19 +417,19 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
           )}
 
           {/* Price */}
-          <div className="flex items-baseline gap-3">
-            <span className="text-3xl font-bold">
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <span className="text-3xl font-bold text-primary">
               {formatPrice(currentPrice)}
             </span>
-            {isOnSale && (
-              <span className="text-xl text-muted-foreground line-through">
-                {formatPrice(originalPrice)}
-              </span>
-            )}
-            {isOnSale && (
-              <Badge variant="destructive" className="text-sm">
-                Save {Math.round((1 - currentPrice / originalPrice) * 100)}%
-              </Badge>
+            {isOnSale && currentPrice < originalPrice && (
+              <>
+                <span className="text-xl text-muted-foreground line-through">
+                  {formatPrice(originalPrice)}
+                </span>
+                <Badge variant="destructive" className="text-sm">
+                  Save {Math.round((1 - currentPrice / originalPrice) * 100)}%
+                </Badge>
+              </>
             )}
           </div>
 

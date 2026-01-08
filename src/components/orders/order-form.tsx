@@ -4,7 +4,6 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import * as z from "zod"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -34,12 +33,106 @@ import {
   IconTrash,
   IconLoader2,
   IconPackage,
+  IconTicket,
+  IconCheck,
+  IconX,
 } from "@tabler/icons-react"
 import Image from "next/image"
+import { Badge } from "@/components/ui/badge"
 
 import { ordersApi } from "@/lib/api/services/orders"
 import { productsApi } from "@/lib/api/services/products"
+import { discountsApi, type DiscountValidationResponse, type DiscountCode } from "@/lib/api"
+import { orderFormSchema, type OrderFormValues } from "@/lib/validations"
+import { formatPrice, formatDiscountBadge as formatDiscountBadgeUtil } from "@/lib/utils"
 import type { OrderCreate, PaymentMethod, Product, ProductVariant } from "@/lib/api/types"
+
+// Helper to get discount for a product/variant
+function getProductDiscount(
+  productId: string,
+  variantId: string | null,
+  autoApplyDiscounts: DiscountCode[]
+): DiscountCode | null {
+  for (const discount of autoApplyDiscounts) {
+    const hasProductRestriction = discount.applicable_products && discount.applicable_products.length > 0
+    const hasVariantRestriction = discount.applicable_variants && discount.applicable_variants.length > 0
+    
+    if (hasProductRestriction || hasVariantRestriction) {
+      // Check variant first if provided
+      if (variantId && hasVariantRestriction && discount.applicable_variants?.includes(variantId)) {
+        return discount
+      }
+      // Check product level
+      if (hasProductRestriction && discount.applicable_products?.includes(productId)) {
+        return discount
+      }
+      // Has restrictions but doesn't match - continue to next
+      continue
+    }
+    
+    // No restrictions - applies to all
+    return discount
+  }
+  return null
+}
+
+// Format discount badge text - wrapper for the utility
+function formatDiscountBadge(discount: DiscountCode): string {
+  return formatDiscountBadgeUtil(discount.discount_value, discount.discount_type as "PERCENTAGE" | "FIXED_AMOUNT")
+}
+
+// Calculate discount amount for an item
+function calculateItemDiscount(
+  unitPrice: number,
+  quantity: number,
+  discount: DiscountCode | null
+): number {
+  if (!discount) return 0
+  
+  const itemTotal = unitPrice * quantity
+  let discountAmount = 0
+  
+  if (discount.discount_type === "PERCENTAGE") {
+    discountAmount = (itemTotal * discount.discount_value) / 100
+  } else {
+    discountAmount = discount.discount_value * quantity
+  }
+  
+  // Apply maximum discount cap if set
+  if (discount.maximum_discount && discountAmount > discount.maximum_discount) {
+    discountAmount = discount.maximum_discount
+  }
+  
+  return discountAmount
+}
+
+// Calculate total discount for all items
+function calculateTotalDiscount(
+  items: OrderFormValues["items"],
+  autoApplyDiscounts: DiscountCode[],
+  subtotal: number
+): { totalDiscount: number; applicableDiscount: DiscountCode | null; meetsMinimum: boolean } {
+  let totalDiscount = 0
+  let applicableDiscount: DiscountCode | null = null
+  
+  for (const item of items) {
+    if (!item.product_id) continue
+    const discount = getProductDiscount(item.product_id, item.variant_id || null, autoApplyDiscounts)
+    if (discount) {
+      applicableDiscount = discount
+      totalDiscount += calculateItemDiscount(item.unit_price, item.quantity, discount)
+    }
+  }
+  
+  // Check minimum order amount
+  const meetsMinimum = !applicableDiscount?.minimum_order_amount || subtotal >= applicableDiscount.minimum_order_amount
+  
+  if (!meetsMinimum) {
+    totalDiscount = 0
+  }
+  
+  return { totalDiscount, applicableDiscount, meetsMinimum }
+}
 
 interface CurrentUser {
   id: string
@@ -51,50 +144,6 @@ interface OrderFormProps {
   currentUserRole?: string
   currentUser?: CurrentUser
 }
-
-const orderItemSchema = z.object({
-  product_id: z.string().optional().nullable(),
-  product_name: z.string().min(1, "Product name is required"),
-  product_sku: z.string().optional().nullable(),
-  product_image: z.string().optional().nullable(),
-  variant_id: z.string().optional().nullable(),
-  variant_name: z.string().optional().nullable(),
-  variant_options: z.record(z.string(), z.string()).optional().nullable(),
-  unit_price: z.number().min(0, "Price must be positive"),
-  quantity: z.number().min(1, "Quantity must be at least 1"),
-})
-
-const orderFormSchema = z.object({
-  customer_name: z.string().min(1, "Customer name is required"),
-  customer_email: z.string().email("Invalid email address"),
-  customer_phone: z.string().optional(),
-  
-  shipping_address: z.string().min(1, "Shipping address is required"),
-  shipping_city: z.string().min(1, "City is required"),
-  shipping_state: z.string().optional(),
-  shipping_zip: z.string().optional(),
-  shipping_country: z.string().min(1, "Country is required"),
-  
-  same_as_shipping: z.boolean().default(true),
-  billing_address: z.string().optional(),
-  billing_city: z.string().optional(),
-  billing_state: z.string().optional(),
-  billing_zip: z.string().optional(),
-  billing_country: z.string().optional(),
-  
-  payment_method: z.enum(["CASH_ON_DELIVERY", "CREDIT_CARD", "DEBIT_CARD", "BANK_TRANSFER", "DIGITAL_WALLET", "OTHER"]).optional(),
-  
-  shipping_cost: z.number().min(0).default(0),
-  tax_amount: z.number().min(0).default(0),
-  discount_amount: z.number().min(0).default(0),
-  
-  notes: z.string().optional(),
-  internal_notes: z.string().optional(),
-  
-  items: z.array(orderItemSchema).min(1, "At least one item is required"),
-})
-
-type OrderFormValues = z.infer<typeof orderFormSchema>
 
 const paymentMethods: { value: PaymentMethod; label: string }[] = [
   { value: "CASH_ON_DELIVERY", label: "Cash on Delivery" },
@@ -110,11 +159,23 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
   const queryClient = useQueryClient()
   const [selectedProductId, setSelectedProductId] = useState<string>("")
   const [selectedVariantId, setSelectedVariantId] = useState<string>("")
+  
+  // Discount code state
+  const [discountCode, setDiscountCode] = useState<string>("")
+  const [discountValidation, setDiscountValidation] = useState<DiscountValidationResponse | null>(null)
+  const [isValidatingDiscount, setIsValidatingDiscount] = useState(false)
+  const [appliedDiscountCodeId, setAppliedDiscountCodeId] = useState<string | null>(null)
 
   // Fetch products for selection
   const { data: productsData } = useQuery({
     queryKey: ["products", "all"],
     queryFn: () => productsApi.list({ per_page: 100, status: "ACTIVE" }),
+  })
+
+  // Fetch auto-apply discounts for badges
+  const { data: autoApplyDiscounts = [] } = useQuery({
+    queryKey: ["discounts", "auto-apply"],
+    queryFn: () => discountsApi.getAutoApplyDiscounts(),
   })
 
   // Fetch selected product details (for variants)
@@ -167,7 +228,12 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
 
   // Calculate totals - recalculates whenever any form value changes
   const subtotal = watchItems.reduce((sum, item) => sum + ((item?.unit_price || 0) * (item?.quantity || 0)), 0)
-  const total = subtotal + (watchShippingCost || 0) + (watchTaxAmount || 0) - (watchDiscountAmount || 0)
+  
+  // Calculate auto-apply discount
+  const autoDiscountResult = calculateTotalDiscount(watchItems, autoApplyDiscounts, subtotal)
+  const effectiveDiscount = discountValidation?.valid ? watchDiscountAmount : autoDiscountResult.totalDiscount
+  
+  const total = subtotal + (watchShippingCost || 0) + (watchTaxAmount || 0) - effectiveDiscount
 
   // Create order mutation
   const createMutation = useMutation({
@@ -183,6 +249,13 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
   })
 
   const onSubmit = (values: OrderFormValues) => {
+    // Determine the discount to use - manual code takes priority over auto-apply
+    const finalDiscountAmount = discountValidation?.valid 
+      ? values.discount_amount 
+      : (autoDiscountResult.meetsMinimum ? autoDiscountResult.totalDiscount : 0)
+    const finalDiscountCodeId = appliedDiscountCodeId || 
+      (autoDiscountResult.meetsMinimum && autoDiscountResult.applicableDiscount ? autoDiscountResult.applicableDiscount.id : undefined)
+    
     const orderData: OrderCreate = {
       user_id: currentUser?.id,  // Link order to authenticated user
       customer_name: values.customer_name,
@@ -201,7 +274,8 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
       payment_method: values.payment_method,
       shipping_cost: values.shipping_cost,
       tax_amount: values.tax_amount,
-      discount_amount: values.discount_amount,
+      discount_amount: finalDiscountAmount,
+      discount_code_id: finalDiscountCodeId,
       notes: values.notes || undefined,
       internal_notes: values.internal_notes || undefined,
       items: values.items.map(item => ({
@@ -218,6 +292,49 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
     }
     
     createMutation.mutate(orderData)
+  }
+  
+  // Validate discount code
+  const handleApplyDiscount = async () => {
+    if (!discountCode.trim()) {
+      toast.error("Please enter a discount code")
+      return
+    }
+    
+    setIsValidatingDiscount(true)
+    try {
+      const response = await discountsApi.validate({
+        code: discountCode.trim(),
+        order_subtotal: subtotal,
+        user_id: currentUser?.id,
+      })
+      
+      setDiscountValidation(response)
+      
+      if (response.valid && response.discount_amount) {
+        // Apply the discount
+        form.setValue("discount_amount", response.discount_amount)
+        // Get the discount code ID
+        const discountData = await discountsApi.getByCode(discountCode.trim())
+        setAppliedDiscountCodeId(discountData.id)
+        toast.success(response.message)
+      } else {
+        toast.error(response.message)
+      }
+    } catch (error) {
+      toast.error("Failed to validate discount code")
+      setDiscountValidation({ valid: false, message: "Failed to validate", code: null, discount_type: null, discount_value: null, discount_amount: null })
+    } finally {
+      setIsValidatingDiscount(false)
+    }
+  }
+  
+  // Remove applied discount
+  const handleRemoveDiscount = () => {
+    setDiscountCode("")
+    setDiscountValidation(null)
+    setAppliedDiscountCodeId(null)
+    form.setValue("discount_amount", 0)
   }
 
   const addProductToOrder = () => {
@@ -257,13 +374,6 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
     append(itemToAdd)
     setSelectedProductId("")
     setSelectedVariantId("")
-  }
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(price)
   }
 
   return (
@@ -523,25 +633,45 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
                         <SelectValue placeholder="Select a product" />
                       </SelectTrigger>
                       <SelectContent>
-                        {productsData?.items.map((product) => (
-                          <SelectItem key={product.id} value={product.id}>
-                            {product.name} - {formatPrice(product.sale_price || product.base_price)}
-                          </SelectItem>
-                        ))}
+                        {productsData?.items.map((product) => {
+                          const discount = getProductDiscount(product.id, null, autoApplyDiscounts)
+                          return (
+                            <SelectItem key={product.id} value={product.id}>
+                              <span className="flex items-center gap-2">
+                                {product.name} - {formatPrice(product.sale_price || product.base_price)}
+                                {discount && (
+                                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                    {formatDiscountBadge(discount)}
+                                  </Badge>
+                                )}
+                              </span>
+                            </SelectItem>
+                          )
+                        })}
                       </SelectContent>
                     </Select>
                     
                     {selectedProduct?.has_variants && selectedProduct.variants && (
                       <Select value={selectedVariantId} onValueChange={setSelectedVariantId}>
-                        <SelectTrigger className="w-[200px]">
+                        <SelectTrigger className="w-[250px]">
                           <SelectValue placeholder="Select variant" />
                         </SelectTrigger>
                         <SelectContent>
-                          {selectedProduct.variants.filter(v => v.is_active && v.stock > 0).map((variant) => (
-                            <SelectItem key={variant.id} value={variant.id}>
-                              {variant.name} ({variant.stock} in stock)
-                            </SelectItem>
-                          ))}
+                          {selectedProduct.variants.filter(v => v.is_active && v.stock > 0).map((variant) => {
+                            const discount = getProductDiscount(selectedProduct.id, variant.id, autoApplyDiscounts)
+                            return (
+                              <SelectItem key={variant.id} value={variant.id}>
+                                <span className="flex items-center gap-2">
+                                  {variant.name} ({variant.stock} in stock)
+                                  {discount && (
+                                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                      {formatDiscountBadge(discount)}
+                                    </Badge>
+                                  )}
+                                </span>
+                              </SelectItem>
+                            )
+                          })}
                         </SelectContent>
                       </Select>
                     )}
@@ -563,71 +693,90 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {fields.map((field, index) => (
-                        <div
-                          key={field.id}
-                          className="flex items-center gap-4 p-4 border rounded-lg"
-                        >
-                          <div className="relative w-16 h-16 rounded-md overflow-hidden bg-muted flex-shrink-0">
-                            {watchItems[index]?.product_image ? (
-                              <Image
-                                src={watchItems[index].product_image!}
-                                alt={watchItems[index].product_name}
-                                fill
-                                className="object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <IconPackage className="h-6 w-6 text-muted-foreground" />
-                              </div>
-                            )}
-                          </div>
-                          
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">
-                              {watchItems[index]?.product_name}
-                            </div>
-                            {watchItems[index]?.variant_name && (
-                              <div className="text-sm text-muted-foreground">
-                                {watchItems[index].variant_name}
-                              </div>
-                            )}
-                            <div className="text-sm text-muted-foreground">
-                              {formatPrice(watchItems[index]?.unit_price || 0)} each
-                            </div>
-                          </div>
-                          
-                          <FormField
-                            control={form.control}
-                            name={`items.${index}.quantity`}
-                            render={({ field }) => (
-                              <FormItem className="w-20">
-                                <FormControl>
-                                  <Input
-                                    type="number"
-                                    min={1}
-                                    {...field}
-                                    onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
-                                  />
-                                </FormControl>
-                              </FormItem>
-                            )}
-                          />
-                          
-                          <div className="w-24 text-right font-medium">
-                            {formatPrice((watchItems[index]?.unit_price || 0) * (watchItems[index]?.quantity || 1))}
-                          </div>
-                          
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => remove(index)}
+                      {fields.map((field, index) => {
+                        const item = watchItems[index]
+                        const itemDiscount = item?.product_id 
+                          ? getProductDiscount(item.product_id, item.variant_id || null, autoApplyDiscounts)
+                          : null
+                        
+                        return (
+                          <div
+                            key={field.id}
+                            className="flex items-center gap-4 p-4 border rounded-lg"
                           >
-                            <IconTrash className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      ))}
+                            <div className="relative w-16 h-16 rounded-md overflow-hidden bg-muted flex-shrink-0">
+                              {item?.product_image ? (
+                                <Image
+                                  src={item.product_image!}
+                                  alt={item.product_name}
+                                  fill
+                                  className="object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <IconPackage className="h-6 w-6 text-muted-foreground" />
+                                </div>
+                              )}
+                              {itemDiscount && (
+                                <div className="absolute top-0 left-0 right-0">
+                                  <Badge variant="destructive" className="text-[9px] px-1 py-0 rounded-none w-full justify-center">
+                                    {formatDiscountBadge(itemDiscount)}
+                                  </Badge>
+                                </div>
+                              )}
+                            </div>
+                            
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate flex items-center gap-2">
+                                {item?.product_name}
+                                {itemDiscount && (
+                                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-green-600 bg-green-50">
+                                    {itemDiscount.code}
+                                  </Badge>
+                                )}
+                              </div>
+                              {item?.variant_name && (
+                                <div className="text-sm text-muted-foreground">
+                                  {item.variant_name}
+                                </div>
+                              )}
+                              <div className="text-sm text-muted-foreground">
+                                {formatPrice(item?.unit_price || 0)} each
+                              </div>
+                            </div>
+                            
+                            <FormField
+                              control={form.control}
+                              name={`items.${index}.quantity`}
+                              render={({ field }) => (
+                                <FormItem className="w-20">
+                                  <FormControl>
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      {...field}
+                                      onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+                                    />
+                                  </FormControl>
+                                </FormItem>
+                              )}
+                            />
+                            
+                            <div className="w-24 text-right font-medium">
+                              {formatPrice((item?.unit_price || 0) * (item?.quantity || 1))}
+                            </div>
+                            
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => remove(index)}
+                            >
+                              <IconTrash className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </CardContent>
@@ -768,27 +917,123 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
                       )}
                     />
                     
-                    <FormField
-                      control={form.control}
-                      name="discount_amount"
-                      render={({ field }) => (
-                        <FormItem>
-                          <div className="flex justify-between items-center">
-                            <FormLabel className="text-muted-foreground">Discount</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min={0}
-                                className="w-24 text-right"
-                                {...field}
-                                onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                              />
-                            </FormControl>
+                    {/* Discount Amount Display */}
+                    {effectiveDiscount > 0 && (
+                      <div className="flex justify-between items-center text-green-600">
+                        <span className="text-muted-foreground">Discount</span>
+                        <span>-{formatPrice(effectiveDiscount)}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Auto-Apply Discount Notice */}
+                  {autoDiscountResult.applicableDiscount && !appliedDiscountCodeId && (
+                    <div className="border-t pt-4">
+                      {autoDiscountResult.meetsMinimum ? (
+                        <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
+                          <div className="flex items-center gap-2">
+                            <IconCheck className="h-4 w-4 text-green-600" />
+                            <div>
+                              <p className="text-sm font-medium text-green-700 dark:text-green-400">
+                                Auto-discount applied!
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                <code className="font-mono font-bold">{autoDiscountResult.applicableDiscount.code}</code>
+                                {" - "}
+                                {formatDiscountBadge(autoDiscountResult.applicableDiscount)}
+                              </p>
+                            </div>
                           </div>
-                        </FormItem>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-amber-50 dark:bg-amber-950 rounded-lg border border-amber-200 dark:border-amber-800">
+                          <div className="flex items-start gap-2">
+                            <IconTicket className="h-4 w-4 text-amber-600 mt-0.5" />
+                            <div>
+                              <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                                Discount available!
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Add {formatPrice((autoDiscountResult.applicableDiscount.minimum_order_amount || 0) - subtotal)} more to get{" "}
+                                <code className="font-mono font-bold">{autoDiscountResult.applicableDiscount.code}</code>
+                                {" ("}
+                                {formatDiscountBadge(autoDiscountResult.applicableDiscount)}
+                                {")"}
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Minimum order: {formatPrice(autoDiscountResult.applicableDiscount.minimum_order_amount || 0)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
                       )}
-                    />
+                    </div>
+                  )}
+                  
+                  {/* Discount Code Input */}
+                  <div className="border-t pt-4 space-y-3">
+                    <Label className="text-sm font-medium flex items-center gap-2">
+                      <IconTicket className="h-4 w-4" />
+                      Discount Code
+                    </Label>
+                    
+                    {appliedDiscountCodeId ? (
+                      // Show applied discount
+                      <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
+                        <div className="flex items-center gap-2">
+                          <IconCheck className="h-4 w-4 text-green-600" />
+                          <div>
+                            <code className="font-mono font-bold text-sm">{discountValidation?.code}</code>
+                            <p className="text-xs text-muted-foreground">
+                              {discountValidation?.discount_type && discountValidation?.discount_value
+                                ? formatDiscountBadgeUtil(discountValidation.discount_value, discountValidation.discount_type as "PERCENTAGE" | "FIXED_AMOUNT").toLowerCase().replace("off", "off")
+                                : ""
+                              }
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleRemoveDiscount}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <IconX className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      // Show input for entering code
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder={autoDiscountResult.meetsMinimum && autoDiscountResult.applicableDiscount 
+                            ? "Auto-discount applied" 
+                            : "Enter code"
+                          }
+                          value={discountCode}
+                          onChange={(e) => setDiscountCode(e.target.value.toUpperCase())}
+                          className="font-mono uppercase"
+                          disabled={isValidatingDiscount || fields.length === 0 || (autoDiscountResult.meetsMinimum && !!autoDiscountResult.applicableDiscount)}
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={handleApplyDiscount}
+                          disabled={isValidatingDiscount || !discountCode.trim() || fields.length === 0 || (autoDiscountResult.meetsMinimum && !!autoDiscountResult.applicableDiscount)}
+                        >
+                          {isValidatingDiscount ? (
+                            <IconLoader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            "Apply"
+                          )}
+                        </Button>
+                      </div>
+                    )}
+                    
+                    {/* Show error message */}
+                    {discountValidation && !discountValidation.valid && (
+                      <p className="text-xs text-destructive">{discountValidation.message}</p>
+                    )}
                   </div>
                   
                   <div className="border-t pt-4">

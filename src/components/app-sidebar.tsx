@@ -6,6 +6,7 @@ import {
   IconChartBar,
   IconDashboard,
   IconDatabase,
+  IconDiscount,
   IconFileAi,
   IconFileDescription,
   IconFileWord,
@@ -76,6 +77,12 @@ const allNavItems = [
     url: "/inventory",
     icon: IconPackages,
     permission: "inventory" as PermissionModule,
+  },
+  {
+    title: "Discounts",
+    url: "/settings/discounts",
+    icon: IconDiscount,
+    permission: "products" as PermissionModule, // Use products permission for discounts
   },
   {
     title: "Users",

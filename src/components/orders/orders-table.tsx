@@ -55,6 +55,7 @@ import {
 
 import { ordersApi, type OrderListResponse } from "@/lib/api/services/orders"
 import type { OrderListItem, OrderStatus, PaymentStatus } from "@/lib/api/types"
+import { formatPrice } from "@/lib/utils"
 
 interface OrdersTableProps {
   currentUserRole?: string
@@ -257,13 +258,6 @@ export function OrdersTable({ currentUserRole, canEdit = true }: OrdersTableProp
     if (urlPaymentStatus !== paymentStatusFilter) setPaymentStatusFilter(urlPaymentStatus)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(price)
-  }
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return "N/A"

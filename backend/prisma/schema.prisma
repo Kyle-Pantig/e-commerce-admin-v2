@@ -424,6 +424,8 @@ model Order {
   shippingCost    Float          @default(0) @map("shipping_cost")
   taxAmount       Float          @default(0) @map("tax_amount")
   discountAmount  Float          @default(0) @map("discount_amount")
+  discountCodeId  String?        @map("discount_code_id")
+  discountCode    DiscountCode?  @relation(fields: [discountCodeId], references: [id], onDelete: SetNull)
   total           Float          // Final total
   
   // Additional info
@@ -506,4 +508,56 @@ model OrderStatusHistory {
   @@index([orderId])
   @@index([createdAt])
   @@map("order_status_history")
+}
+
+// ==========================================
+// DISCOUNT CODE MANAGEMENT
+// ==========================================
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+model DiscountCode {
+  id                String       @id @default(uuid())
+  code              String       @unique // e.g., "SUMMER20", "WELCOME10"
+  description       String?      // Internal description
+  
+  // Discount configuration
+  discountType      DiscountType @default(PERCENTAGE) @map("discount_type")
+  discountValue     Float        @map("discount_value") // Percentage (0-100) or fixed amount
+  
+  // Limits
+  minimumOrderAmount Float?      @map("minimum_order_amount") // Min order to apply discount
+  maximumDiscount    Float?      @map("maximum_discount") // Cap for percentage discounts
+  usageLimit         Int?        @map("usage_limit") // Total times code can be used (null = unlimited)
+  usageLimitPerUser  Int?        @map("usage_limit_per_user") // Per user limit (null = unlimited)
+  usageCount         Int         @default(0) @map("usage_count") // Current usage count
+  
+  // Validity
+  isActive          Boolean      @default(true) @map("is_active")
+  startDate         DateTime?    @map("start_date") // When discount becomes active
+  endDate           DateTime?    @map("end_date") // When discount expires
+  
+  // Auto-apply settings (for product-level discounts)
+  autoApply         Boolean      @default(false) @map("auto_apply") // Auto-apply to products without code
+  showBadge         Boolean      @default(true) @map("show_badge") // Show discount badge on products
+  
+  // Restrictions (null = applies to all)
+  applicableProducts Json?       @map("applicable_products") // Product IDs array
+  applicableVariants Json?       @map("applicable_variants") // Variant IDs array (for specific variants)
+  applicableCategories Json?     @map("applicable_categories") // Category IDs array
+  
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  createdBy         String?      @map("created_by") // Admin who created it
+  
+  // Relations
+  orders            Order[]      // Orders that used this discount
+  
+  @@index([code])
+  @@index([isActive])
+  @@index([startDate, endDate])
+  @@map("discount_codes")
 }

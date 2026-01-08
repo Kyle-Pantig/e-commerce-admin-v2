@@ -67,14 +67,47 @@ import {
   IconLoader2,
 } from "@tabler/icons-react"
 import Image from "next/image"
-import { cn } from "@/lib/utils"
+import { cn, formatPrice, formatDiscountBadge } from "@/lib/utils"
 import { useSidebar } from "@/components/ui/sidebar"
 import { useIsMobile } from "@/hooks/use-mobile"
 
 // Import shared API services and types
 import { productsApi, type ProductListResponse } from "@/lib/api/services/products"
 import { categoriesApi } from "@/lib/api/services/categories"
+import { discountsApi, type DiscountCode } from "@/lib/api/services/discounts"
 import type { ProductListItem, Category, ProductStatus } from "@/lib/api/types"
+
+// Helper to check if product or its variants has an applicable discount
+function getProductDiscountInfo(
+  product: ProductListItem,
+  autoApplyDiscounts: DiscountCode[]
+): DiscountCode | null {
+  for (const discount of autoApplyDiscounts) {
+    const hasProductRestriction = discount.applicable_products && discount.applicable_products.length > 0
+    const hasVariantRestriction = discount.applicable_variants && discount.applicable_variants.length > 0
+    
+    if (hasProductRestriction || hasVariantRestriction) {
+      // Check product level first
+      if (hasProductRestriction && discount.applicable_products?.includes(product.id)) {
+        return discount
+      }
+      // Check if any variant of this product is included
+      if (hasVariantRestriction && product.variants) {
+        const hasMatchingVariant = product.variants.some(v => 
+          discount.applicable_variants?.includes(v.id)
+        )
+        if (hasMatchingVariant) {
+          return discount
+        }
+      }
+      continue
+    }
+    
+    // No restrictions - applies to all
+    return discount
+  }
+  return null
+}
 
 interface ProductsTableProps {
   currentUserRole?: string
@@ -216,6 +249,12 @@ export function ProductsTable({ currentUserRole, canEdit = true }: ProductsTable
       include_inactive: true,
     }),
     retry: 1,
+  })
+
+  // Fetch auto-apply discounts for discount badges
+  const { data: autoApplyDiscounts = [] } = useQuery<DiscountCode[]>({
+    queryKey: ["discounts", "auto-apply"],
+    queryFn: () => discountsApi.getAutoApplyDiscounts(),
   })
 
   // Delete mutation
@@ -405,13 +444,6 @@ export function ProductsTable({ currentUserRole, canEdit = true }: ProductsTable
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]) // Only sync when URL params change externally
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(price)
-  }
-
   const formatDate = (dateString: string | null) => {
     if (!dateString) return "N/A"
     try {
@@ -577,6 +609,20 @@ export function ProductsTable({ currentUserRole, canEdit = true }: ProductsTable
           )}
         </div>
       ),
+    },
+    {
+      id: "discount",
+      header: "Discount",
+      cell: ({ row }) => {
+        const discount = getProductDiscountInfo(row.original, autoApplyDiscounts)
+        if (!discount) return <span className="text-muted-foreground text-xs">-</span>
+        
+        return (
+          <Badge variant="destructive" className="text-xs whitespace-nowrap">
+            {formatDiscountBadge(discount.discount_value, discount.discount_type as "PERCENTAGE" | "FIXED_AMOUNT")}
+          </Badge>
+        )
+      },
     },
     {
       accessorKey: "stock",
