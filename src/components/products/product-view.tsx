@@ -36,6 +36,7 @@ import { cn, formatPrice, formatDiscountBadge } from "@/lib/utils"
 // Import shared API services and types
 import { productsApi } from "@/lib/api/services/products"
 import { discountsApi, type DiscountCode } from "@/lib/api/services/discounts"
+import { shippingApi, type ShippingCalculationResponse } from "@/lib/api/services/shipping"
 import type { Product, ProductImage, ProductVariant, ProductAttributeValue } from "@/lib/api/types"
 
 // Helper to get applicable discount for product/variant
@@ -228,6 +229,16 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
   // Has sale price or auto-apply discount
   const isOnSale = currentPrice < originalPrice || !!applicableDiscount
   const hasAutoDiscount = !!applicableDiscount
+
+  // Fetch shipping info for this product
+  const { data: shippingInfo } = useQuery<ShippingCalculationResponse>({
+    queryKey: ["shipping", "calculate", product?.id, currentPrice, quantity],
+    queryFn: () => shippingApi.calculate({
+      order_subtotal: currentPrice * quantity,
+      product_ids: product?.id ? [product.id] : undefined,
+    }),
+    enabled: !!product?.id,
+  })
 
   const handleOptionChange = (optionKey: string, value: string) => {
     setSelectedOptions(prev => {
@@ -560,9 +571,28 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
           {/* Trust Badges */}
           <div className="grid grid-cols-3 gap-4 pt-4">
             <div className="flex flex-col items-center text-center p-3 rounded-lg bg-muted/50">
-              <IconTruck className="h-6 w-6 mb-2 text-primary" />
-              <span className="text-xs font-medium">Free Shipping</span>
-              <span className="text-xs text-muted-foreground">Orders $50+</span>
+              <IconTruck className={cn("h-6 w-6 mb-2", shippingInfo?.is_free_shipping ? "text-green-500" : "text-primary")} />
+              {shippingInfo?.is_free_shipping ? (
+                <>
+                  <span className="text-xs font-medium text-green-600">Free Shipping</span>
+                  <span className="text-xs text-muted-foreground">On this order</span>
+                </>
+              ) : shippingInfo?.free_shipping_threshold ? (
+                <>
+                  <span className="text-xs font-medium">Free Shipping</span>
+                  <span className="text-xs text-muted-foreground">Orders ₱{shippingInfo.free_shipping_threshold.toLocaleString()}+</span>
+                </>
+              ) : shippingInfo ? (
+                <>
+                  <span className="text-xs font-medium">Shipping</span>
+                  <span className="text-xs text-muted-foreground">₱{shippingInfo.shipping_fee.toLocaleString()}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs font-medium">Shipping</span>
+                  <span className="text-xs text-muted-foreground">Calculated at checkout</span>
+                </>
+              )}
             </div>
             <div className="flex flex-col items-center text-center p-3 rounded-lg bg-muted/50">
               <IconShieldCheck className="h-6 w-6 mb-2 text-primary" />

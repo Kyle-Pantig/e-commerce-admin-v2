@@ -83,6 +83,41 @@ export type {
   DiscountValidationResponse,
 } from "./services/discounts"
 
+export { shippingApi } from "./services/shipping"
+export type {
+  ShippingRule,
+  ShippingRuleCreate,
+  ShippingRuleUpdate,
+  ShippingRuleListParams,
+  ShippingRuleListResponse,
+  ShippingCalculationRequest,
+  ShippingCalculationResponse,
+} from "./services/shipping"
+
+export { taxApi } from "./services/tax"
+export type {
+  TaxRule,
+  TaxRuleCreate,
+  TaxRuleUpdate,
+  TaxRuleListParams,
+  TaxRuleListResponse,
+  TaxCalculationRequest,
+  TaxCalculationResponse,
+} from "./services/tax"
+
+export { siteContentApi, CONTENT_KEYS } from "./services/site-content"
+export type {
+  BannerItem,
+  HeroBannersContent,
+  AnnouncementContent,
+  FeaturedCategoryItem,
+  FeaturedCategoriesContent,
+  SiteContent,
+  SiteContentCreate,
+  SiteContentUpdate,
+  SiteContentListResponse,
+} from "./services/site-content"
+
 // =============================================================================
 // Types - Re-export all types for convenience
 // =============================================================================

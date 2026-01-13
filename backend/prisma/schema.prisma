@@ -511,6 +511,62 @@ model OrderStatusHistory {
 }
 
 // ==========================================
+// SHIPPING RULES
+// ==========================================
+
+model ShippingRule {
+  id                    String   @id @default(uuid())
+  name                  String   // e.g., "Standard Shipping", "Heavy Items Shipping"
+  description           String?  // Internal description
+  
+  shippingFee           Float    @default(0) @map("shipping_fee")
+  freeShippingThreshold Float?   @map("free_shipping_threshold")
+  isActive              Boolean  @default(true) @map("is_active")
+  
+  // Product-specific shipping (null = default rule for all products)
+  applicableProducts    Json?    @map("applicable_products") // Product IDs array
+  
+  // Priority for rule matching (higher = checked first)
+  priority              Int      @default(0)
+  
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@index([priority])
+  @@map("shipping_rules")
+}
+
+// ==========================================
+// TAX RULES
+// ==========================================
+
+model TaxRule {
+  id                    String   @id @default(uuid())
+  name                  String   // e.g., "Standard VAT", "Reduced Rate", "Zero Rate"
+  description           String?  // Internal description
+
+  taxRate               Float    @default(0) @map("tax_rate") // Percentage (e.g., 12 for 12%)
+  taxType               String   @default("PERCENTAGE") @map("tax_type") // PERCENTAGE or FIXED
+  isInclusive           Boolean  @default(false) @map("is_inclusive") // Tax included in price or added
+  isActive              Boolean  @default(true) @map("is_active")
+
+  // Product-specific tax (null = default rule for all products)
+  applicableProducts    Json?    @map("applicable_products") // Product IDs array
+  applicableCategories  Json?    @map("applicable_categories") // Category IDs array
+
+  // Priority for rule matching (higher = checked first)
+  priority              Int      @default(0)
+
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@index([priority])
+  @@map("tax_rules")
+}
+
+// ==========================================
 // DISCOUNT CODE MANAGEMENT
 // ==========================================
 
@@ -561,3 +617,21 @@ model DiscountCode {
   @@index([startDate, endDate])
   @@map("discount_codes")
 }
+
+// Site Content for managing customer-facing website content
+model SiteContent {
+  id          String   @id @default(uuid())
+  key         String   @unique // e.g., "hero_banners", "announcement", "featured_section"
+  title       String?  // Display title for admin
+  content     Json     // Flexible JSON content storage
+  isActive    Boolean  @default(true) @map("is_active")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedBy   String?  @map("updated_by") // Admin who last updated
+  
+  @@index([key])
+  @@index([isActive])
+  @@map("site_content")
+}
+

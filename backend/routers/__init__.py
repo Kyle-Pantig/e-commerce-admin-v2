@@ -10,6 +10,9 @@ from .orders import router as orders_router
 from .analytics import router as analytics_router
 from .inventory import router as inventory_router
 from .discounts import router as discounts_router
+from .shipping import router as shipping_router
+from .tax import router as tax_router
+from .site_content import router as site_content_router
 
 __all__ = [
     "auth_router",
@@ -21,5 +24,8 @@ __all__ = [
     "analytics_router",
     "inventory_router",
     "discounts_router",
+    "shipping_router",
+    "tax_router",
+    "site_content_router",
 ]
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -36,6 +36,8 @@ import {
   IconTicket,
   IconCheck,
   IconX,
+  IconTruck,
+  IconReceipt,
 } from "@tabler/icons-react"
 import Image from "next/image"
 import { Badge } from "@/components/ui/badge"
@@ -43,6 +45,8 @@ import { Badge } from "@/components/ui/badge"
 import { ordersApi } from "@/lib/api/services/orders"
 import { productsApi } from "@/lib/api/services/products"
 import { discountsApi, type DiscountValidationResponse, type DiscountCode } from "@/lib/api"
+import { shippingApi, type ShippingCalculationResponse } from "@/lib/api/services/shipping"
+import { taxApi, type TaxCalculationResponse } from "@/lib/api/services/tax"
 import { orderFormSchema, type OrderFormValues } from "@/lib/validations"
 import { formatPrice, formatDiscountBadge as formatDiscountBadgeUtil } from "@/lib/utils"
 import type { OrderCreate, PaymentMethod, Product, ProductVariant } from "@/lib/api/types"
@@ -165,6 +169,14 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
   const [discountValidation, setDiscountValidation] = useState<DiscountValidationResponse | null>(null)
   const [isValidatingDiscount, setIsValidatingDiscount] = useState(false)
   const [appliedDiscountCodeId, setAppliedDiscountCodeId] = useState<string | null>(null)
+  
+  // Shipping calculation state
+  const [shippingCalculation, setShippingCalculation] = useState<ShippingCalculationResponse | null>(null)
+  const [isCalculatingShipping, setIsCalculatingShipping] = useState(false)
+  
+  // Tax calculation state
+  const [taxCalculation, setTaxCalculation] = useState<TaxCalculationResponse | null>(null)
+  const [isCalculatingTax, setIsCalculatingTax] = useState(false)
 
   // Fetch products for selection
   const { data: productsData } = useQuery({
@@ -232,6 +244,76 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
   // Calculate auto-apply discount
   const autoDiscountResult = calculateTotalDiscount(watchItems, autoApplyDiscounts, subtotal)
   const effectiveDiscount = discountValidation?.valid ? watchDiscountAmount : autoDiscountResult.totalDiscount
+  
+  // Auto-calculate shipping when items change
+  useEffect(() => {
+    const calculateShipping = async () => {
+      if (watchItems.length === 0) {
+        setShippingCalculation(null)
+        form.setValue("shipping_cost", 0)
+        return
+      }
+      
+      setIsCalculatingShipping(true)
+      try {
+        const productIds = watchItems
+          .map(item => item?.product_id)
+          .filter((id): id is string => !!id)
+        
+        const result = await shippingApi.calculate({
+          order_subtotal: subtotal,
+          product_ids: productIds.length > 0 ? productIds : undefined,
+        })
+        
+        setShippingCalculation(result)
+        form.setValue("shipping_cost", result.shipping_fee)
+      } catch (error) {
+        console.error("Failed to calculate shipping:", error)
+        // Keep previous shipping cost on error
+      } finally {
+        setIsCalculatingShipping(false)
+      }
+    }
+    
+    // Debounce the calculation
+    const timeoutId = setTimeout(calculateShipping, 300)
+    return () => clearTimeout(timeoutId)
+  }, [watchItems, subtotal, form])
+  
+  // Auto-calculate tax when items change
+  useEffect(() => {
+    const calculateTax = async () => {
+      if (watchItems.length === 0) {
+        setTaxCalculation(null)
+        form.setValue("tax_amount", 0)
+        return
+      }
+      
+      setIsCalculatingTax(true)
+      try {
+        const productIds = watchItems
+          .map(item => item?.product_id)
+          .filter((id): id is string => !!id)
+        
+        const result = await taxApi.calculate({
+          order_subtotal: subtotal,
+          product_ids: productIds.length > 0 ? productIds : undefined,
+        })
+        
+        setTaxCalculation(result)
+        form.setValue("tax_amount", result.tax_amount)
+      } catch (error) {
+        console.error("Failed to calculate tax:", error)
+        // Keep previous tax amount on error
+      } finally {
+        setIsCalculatingTax(false)
+      }
+    }
+    
+    // Debounce the calculation
+    const timeoutId = setTimeout(calculateTax, 300)
+    return () => clearTimeout(timeoutId)
+  }, [watchItems, subtotal, form])
   
   const total = subtotal + (watchShippingCost || 0) + (watchTaxAmount || 0) - effectiveDiscount
 
@@ -873,49 +955,74 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
                       <span>{formatPrice(subtotal)}</span>
                     </div>
                     
-                    <FormField
-                      control={form.control}
-                      name="shipping_cost"
-                      render={({ field }) => (
-                        <FormItem>
-                          <div className="flex justify-between items-center">
-                            <FormLabel className="text-muted-foreground">Shipping</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min={0}
-                                className="w-24 text-right"
-                                {...field}
-                                onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                              />
-                            </FormControl>
-                          </div>
-                        </FormItem>
-                      )}
-                    />
+                    {/* Shipping */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                        <IconTruck className="h-4 w-4" />
+                        Shipping
+                        {shippingCalculation?.rule_name && (
+                          <span className="text-xs">({shippingCalculation.rule_name})</span>
+                        )}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        {isCalculatingShipping ? (
+                          <IconLoader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : shippingCalculation?.is_free_shipping ? (
+                          <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs">
+                            FREE
+                          </Badge>
+                        ) : (
+                          formatPrice(watchShippingCost || 0)
+                        )}
+                      </span>
+                    </div>
                     
-                    <FormField
-                      control={form.control}
-                      name="tax_amount"
-                      render={({ field }) => (
-                        <FormItem>
-                          <div className="flex justify-between items-center">
-                            <FormLabel className="text-muted-foreground">Tax</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min={0}
-                                className="w-24 text-right"
-                                {...field}
-                                onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                              />
-                            </FormControl>
-                          </div>
-                        </FormItem>
-                      )}
-                    />
+                    {/* Free shipping threshold hint */}
+                    {shippingCalculation && !shippingCalculation.is_free_shipping && shippingCalculation.free_shipping_threshold && (
+                      <div className="p-2 bg-amber-50 dark:bg-amber-950 rounded-lg border border-amber-200 dark:border-amber-800">
+                        <p className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                          <IconTruck className="h-3.5 w-3.5" />
+                          Add {formatPrice(shippingCalculation.free_shipping_threshold - subtotal)} more for free shipping!
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* Tax */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                        <IconReceipt className="h-4 w-4" />
+                        Tax
+                        {taxCalculation?.rule_name && (
+                          <span className="text-xs">({taxCalculation.rule_name})</span>
+                        )}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        {isCalculatingTax ? (
+                          <IconLoader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : taxCalculation ? (
+                          <>
+                            {formatPrice(watchTaxAmount || 0)}
+                            {taxCalculation.tax_type === "PERCENTAGE" && (
+                              <Badge variant="outline" className="text-xs">
+                                {taxCalculation.tax_rate}%
+                              </Badge>
+                            )}
+                          </>
+                        ) : (
+                          formatPrice(watchTaxAmount || 0)
+                        )}
+                      </span>
+                    </div>
+                    
+                    {/* Tax info */}
+                    {taxCalculation?.is_inclusive && (
+                      <div className="p-2 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
+                        <p className="text-xs text-blue-700 dark:text-blue-400 flex items-center gap-1.5">
+                          <IconReceipt className="h-3.5 w-3.5" />
+                          Tax is already included in product prices
+                        </p>
+                      </div>
+                    )}
                     
                     {/* Discount Amount Display */}
                     {effectiveDiscount > 0 && (

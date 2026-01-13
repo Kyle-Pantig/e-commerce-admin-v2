@@ -23,7 +23,7 @@ async def upload_image(
     Args:
         file: The image file to upload
         folder: The folder in storage (default: "categories")
-        bucket: The storage bucket to use (default: "categories", can be "products")
+        bucket: The storage bucket to use (default: "categories", can be "products" or "site-content")
         product_id: Optional product ID to organize images under products/{product_id}/
     
     Returns:
@@ -62,8 +62,8 @@ async def upload_image(
         # Upload to Supabase Storage
         admin_client = get_supabase_admin_client()
         
-        # Use specified bucket (categories or products)
-        bucket_name = bucket if bucket in ["categories", "products"] else "categories"
+        # Use specified bucket (categories, products, or site-content)
+        bucket_name = bucket if bucket in ["categories", "products", "site-content"] else "categories"
         
         # Ensure the bucket exists (create if it doesn't)
         try:
@@ -127,13 +127,13 @@ async def delete_image(
     
     Args:
         file_path: The path to the file in storage (e.g., "categories/uuid.jpg" or "product-id/uuid.jpg")
-        bucket: The storage bucket (default: "categories", can be "products")
+        bucket: The storage bucket (default: "categories", can be "products" or "site-content")
     """
     try:
         admin_client = get_supabase_admin_client()
         
         # Use specified bucket
-        bucket_name = bucket if bucket in ["categories", "products"] else "categories"
+        bucket_name = bucket if bucket in ["categories", "products", "site-content"] else "categories"
         
         # Delete file
         delete_response = admin_client.storage.from_(bucket_name).remove([file_path])

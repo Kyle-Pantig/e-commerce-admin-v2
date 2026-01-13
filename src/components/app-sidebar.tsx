@@ -16,11 +16,14 @@ import {
   IconListDetails,
   IconPackage,
   IconPackages,
+  IconPhoto,
   IconReceipt,
+  IconReceiptTax,
   IconReport,
   IconSearch,
   IconSettings,
   IconTags,
+  IconTruck,
   IconUsers,
 } from "@tabler/icons-react"
 
@@ -83,6 +86,24 @@ const allNavItems = [
     url: "/settings/discounts",
     icon: IconDiscount,
     permission: "products" as PermissionModule, // Use products permission for discounts
+  },
+  {
+    title: "Shipping",
+    url: "/settings/shipping",
+    icon: IconTruck,
+    permission: "products" as PermissionModule, // Use products permission for shipping
+  },
+  {
+    title: "Tax",
+    url: "/settings/tax",
+    icon: IconReceiptTax,
+    permission: "products" as PermissionModule, // Use products permission for tax
+  },
+  {
+    title: "Site Settings",
+    url: "/settings/site",
+    icon: IconPhoto,
+    permission: "products" as PermissionModule, // Use products permission for site content
   },
   {
     title: "Users",

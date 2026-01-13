@@ -34,7 +34,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { discountsApi, type DiscountCode, productsApi } from "@/lib/api"
+import { discountsApi, type DiscountCode, productsApi, categoriesApi, type Category } from "@/lib/api"
 import { formatPrice } from "@/lib/utils"
 import { DateTimePicker } from "@/components/ui/date-time-picker"
 import { discountFormSchema, type DiscountFormData } from "@/lib/validations"
@@ -70,6 +70,7 @@ interface DiscountCodeFormProps {
 export function DiscountCodeForm({ discount, onSuccess, onCancel }: DiscountCodeFormProps) {
   const isEditing = !!discount
   const [productSearch, setProductSearch] = useState("")
+  const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set())
   const [isProductSectionOpen, setIsProductSectionOpen] = useState(
     !!((discount?.applicable_products && discount.applicable_products.length > 0) ||
@@ -77,9 +78,15 @@ export function DiscountCodeForm({ discount, onSuccess, onCancel }: DiscountCode
   )
 
   // Fetch products with variants for selection (max 100 per page due to backend limit)
-  const { data: productsData } = useQuery({
+  const { data: productsData, isLoading: isProductsLoading } = useQuery({
     queryKey: ["products", "all-for-discount-with-variants"],
     queryFn: () => productsApi.list({ per_page: 100, status: "ACTIVE", include_inactive: false }),
+  })
+
+  // Fetch categories for filtering
+  const { data: categoriesData } = useQuery<Category[]>({
+    queryKey: ["categories"],
+    queryFn: () => categoriesApi.list({ include_inactive: false }),
   })
 
   const form = useForm({
@@ -171,12 +178,14 @@ export function DiscountCodeForm({ discount, onSuccess, onCancel }: DiscountCode
   const selectedProductIds = form.watch("applicable_products") || []
   const selectedVariantIds = form.watch("applicable_variants") || []
 
-  // Filter products based on search
-  const filteredProducts = productsData?.items.filter(product => 
-    product.name.toLowerCase().includes(productSearch.toLowerCase()) ||
-    product.sku?.toLowerCase().includes(productSearch.toLowerCase()) ||
-    product.variants?.some(v => v.name.toLowerCase().includes(productSearch.toLowerCase()))
-  ) || []
+  // Filter products based on search and category
+  const filteredProducts = productsData?.items.filter(product => {
+    const matchesSearch = product.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+      product.sku?.toLowerCase().includes(productSearch.toLowerCase()) ||
+      product.variants?.some(v => v.name.toLowerCase().includes(productSearch.toLowerCase()))
+    const matchesCategory = selectedCategory === "all" || product.category_id === selectedCategory
+    return matchesSearch && matchesCategory
+  }) || []
 
   // Get selected product details
   const selectedProducts = productsData?.items.filter(p => 
@@ -635,21 +644,41 @@ export function DiscountCodeForm({ discount, onSuccess, onCancel }: DiscountCode
                         </div>
                       )}
 
-                      {/* Search */}
-                      <div className="relative">
-                        <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          placeholder="Search products or variants..."
-                          value={productSearch}
-                          onChange={(e) => setProductSearch(e.target.value)}
-                          className="pl-9 h-10"
-                        />
+                      {/* Search and Category Filter */}
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                          <Input
+                            placeholder="Search products or variants..."
+                            value={productSearch}
+                            onChange={(e) => setProductSearch(e.target.value)}
+                            className="pl-9 h-10"
+                          />
+                        </div>
+                        <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                          <SelectTrigger className="w-[180px] !h-10">
+                            <SelectValue placeholder="All Categories" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Categories</SelectItem>
+                            {categoriesData?.map((category) => (
+                              <SelectItem key={category.id} value={category.id}>
+                                {category.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
 
                       {/* Product List with Variants */}
                       <ScrollArea className="h-[300px] rounded-md border">
                         <div className="p-2 space-y-1">
-                          {filteredProducts.length === 0 ? (
+                          {isProductsLoading ? (
+                            <div className="flex items-center justify-center py-8">
+                              <IconLoader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                              <span className="ml-2 text-sm text-muted-foreground">Loading products...</span>
+                            </div>
+                          ) : filteredProducts.length === 0 ? (
                             <p className="text-sm text-muted-foreground text-center py-4">
                               No products found
                             </p>
