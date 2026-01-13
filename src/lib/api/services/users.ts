@@ -94,7 +94,7 @@ export const authApi = {
   },
 
   /**
-   * Sign up new user
+   * Sign up new user (admin/staff flow - no OTP required)
    * @param email - User email
    * @param password - User password
    * @param fullName - Optional full name
@@ -107,6 +107,51 @@ export const authApi = {
     return apiClient.post<AuthResponse>(
       "/auth/signup",
       { email, password, full_name: fullName },
+      { skipAuth: true }
+    )
+  },
+
+  /**
+   * Sign up with OTP verification (customer flow)
+   * Sends OTP to email for verification
+   */
+  signupWithOtp: (data: {
+    email: string
+    password: string
+    full_name: string
+    phone?: string
+  }): Promise<{ message: string; email: string; expires_in_minutes: number }> => {
+    return apiClient.post(
+      "/auth/signup-with-otp",
+      data,
+      { skipAuth: true }
+    )
+  },
+
+  /**
+   * Verify OTP code
+   */
+  verifyOtp: (
+    email: string,
+    code: string
+  ): Promise<{ message: string; verified: boolean }> => {
+    return apiClient.post(
+      "/auth/verify-otp",
+      { email, code },
+      { skipAuth: true }
+    )
+  },
+
+  /**
+   * Resend OTP code
+   */
+  resendOtp: (
+    email: string,
+    type: "SIGNUP" | "PASSWORD_RESET" = "SIGNUP"
+  ): Promise<{ message: string; email: string; expires_in_minutes: number }> => {
+    return apiClient.post(
+      "/auth/resend-otp",
+      { email, type },
       { skipAuth: true }
     )
   },

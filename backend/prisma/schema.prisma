@@ -31,6 +31,14 @@ model User {
   role        UserRole @default(CUSTOMER)
   isApproved  Boolean  @default(false) @map("is_approved")
   
+  // Email verification for customers
+  emailVerified   Boolean  @default(false) @map("email_verified")
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  
+  // Customer-specific fields
+  phone           String?
+  avatarUrl       String?  @map("avatar_url")
+  
   // Staff permissions (stored as JSON for flexibility)
   // Format: {"products": "edit", "orders": "view", "inventory": "none", ...}
   permissions Json?
@@ -40,13 +48,83 @@ model User {
 
   // Relations
   orders      Order[]
+  cart        Cart?     // One cart per user
 
   // Performance indexes
   @@index([isApproved])                    // Approval status filtering
   @@index([role])                          // Role-based filtering
   @@index([createdAt])                     // Sorting by creation date
   @@index([role, isApproved])              // Combined role and approval queries
+  @@index([emailVerified])                 // Email verification status
   @@map("users")
+}
+
+// OTP Verification for customer signup/login
+model OtpVerification {
+  id          String   @id @default(uuid())
+  email       String
+  code        String   // 6-digit OTP code
+  type        OtpType  @default(SIGNUP)
+  expiresAt   DateTime @map("expires_at")
+  verified    Boolean  @default(false)
+  attempts    Int      @default(0) // Track failed attempts
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([email, type])
+  @@index([expiresAt])
+  @@map("otp_verifications")
+}
+
+enum OtpType {
+  SIGNUP
+  LOGIN
+  PASSWORD_RESET
+}
+
+// ==========================================
+// SHOPPING CART
+// ==========================================
+
+model Cart {
+  id          String     @id @default(uuid())
+  userId      String     @unique @map("user_id")
+  
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  
+  // Relations
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items       CartItem[]
+  
+  @@map("carts")
+}
+
+model CartItem {
+  id          String   @id @default(uuid())
+  cartId      String   @map("cart_id")
+  productId   String   @map("product_id")
+  variantId   String?  @map("variant_id")  // Optional: specific variant
+  quantity    Int      @default(1)
+  
+  // Store selected options (e.g., {"Size": "L", "Color": "Red"})
+  options     Json?
+  
+  // Store price at time of adding to cart (for price change tracking)
+  priceAtAdd  Float    @map("price_at_add")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  cart        Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  
+  // Unique constraint: one product/variant per cart
+  @@unique([cartId, productId, variantId])
+  @@index([cartId])
+  @@index([productId])
+  @@map("cart_items")
 }
 
 enum AttributeType {
@@ -216,7 +294,8 @@ model Product {
   attributeValues  ProductAttributeValue[]
   orderItems       OrderItem[]
   stockAdjustments StockAdjustment[]
-  
+  cartItems        CartItem[]
+
   @@index([categoryId])
   @@index([status])
   @@index([isFeatured])
@@ -272,7 +351,8 @@ model ProductVariant {
   product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   orderItems        OrderItem[]
   stockAdjustments  StockAdjustment[]
-  
+  cartItems         CartItem[]
+
   @@index([productId])
   @@map("product_variants")
 }

@@ -62,14 +62,18 @@ export async function getAuthenticatedUser(): Promise<UserData> {
           redirect("/login?error=pending_approval")
         }
         
-        // Customers cannot access - silently sign out without revealing system info
+        // Customers cannot access admin pages - redirect to home
         if (userInfo.role === "CUSTOMER") {
-          await supabase.auth.signOut()
-          redirect("/login?error=session_expired")
+          redirect("/")
         }
       }
     }
   } catch (error) {
+    // Re-throw redirect errors (Next.js uses these for navigation)
+    const errorDigest = (error as { digest?: string })?.digest
+    if (errorDigest?.startsWith("NEXT_REDIRECT")) {
+      throw error
+    }
     // If API check fails, log but allow access
     // This prevents blocking users if the backend is temporarily unavailable
     console.warn("Failed to check user approval status:", error)

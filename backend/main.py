@@ -31,9 +31,10 @@ app = FastAPI(
 
 # CORS configuration
 origins = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    os.getenv("FRONTEND_URL", "http://localhost:3000"),
+    "http://localhost:3000",  # Admin (default)
+    "http://localhost:3001",  # Customer (default)
+    os.getenv("FRONTEND_URL", "http://localhost:3000"),  # Admin website
+    os.getenv("CUSTOMER_FRONTEND_URL", "http://localhost:3001"),  # Customer website
 ]
 
 app.add_middleware(

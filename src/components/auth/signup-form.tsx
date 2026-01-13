@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { GalleryVerticalEnd } from "lucide-react"
+import { GalleryVerticalEnd, Loader2 } from "lucide-react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
@@ -15,7 +15,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { createClient } from "@/lib/supabase/client"
 import { signupSchema, type SignupFormData } from "@/lib/validations"
 import { authApi } from "@/lib/api/services/users"
 
@@ -35,48 +34,38 @@ export function SignUpForm({
 
   const onSubmit = async (data: SignupFormData) => {
     try {
-      // Use shared API service for signup - it handles email verification automatically
-      const authResponse = await authApi.signup(data.email, data.password, data.fullName)
-      
-      if (!authResponse.user) {
-        setFormError("root", {
-          type: "manual",
-          message: "Signup failed. Please try again.",
-        })
-        return
-      }
-
-      // Sign in with Supabase using the tokens from backend
-      const supabase = createClient()
-      if (authResponse.access_token && authResponse.refresh_token) {
-        const { error: sessionError } = await supabase.auth.setSession({
-          access_token: authResponse.access_token,
-          refresh_token: authResponse.refresh_token,
-        })
-        
-        if (sessionError) {
-          console.warn("Failed to set session:", sessionError)
-        }
-      }
+      // Use OTP-based signup flow
+      await authApi.signupWithOtp({
+        email: data.email,
+        password: data.password,
+        full_name: data.fullName,
+      })
       
       // Show success toast
-      toast.success("Account created successfully!", {
-        description: "Your account is pending admin approval. You will be notified once approved.",
+      toast.success("Verification code sent!", {
+        description: "Please check your email for the verification code.",
         duration: 5000,
       })
       
-      // Redirect to login
-      router.push("/login")
-      router.refresh()
+      // Store email in session to allow access to verify page
+      sessionStorage.setItem("pending_verification_email", data.email)
+      
+      // Redirect to verify page
+      router.push(`/verify?email=${encodeURIComponent(data.email)}`)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Signup failed. Please try again."
       
       // Check if error is email-related and set it on the email field
       const lowerMessage = errorMessage.toLowerCase()
-      if (lowerMessage.includes("email") || lowerMessage.includes("invalid")) {
+      if (lowerMessage.includes("email") || lowerMessage.includes("already exists")) {
         setFormError("email", {
           type: "manual",
           message: errorMessage,
+        })
+      } else if (lowerMessage.includes("wait") || lowerMessage.includes("too many")) {
+        setFormError("root", {
+          type: "manual",
+          message: "Please wait a moment before trying again",
         })
       } else {
         setFormError("root", {
@@ -93,13 +82,13 @@ export function SignUpForm({
         <FieldGroup>
           <div className="flex flex-col items-center gap-2 text-center">
             <a
-              href="#"
+              href="/"
               className="flex flex-col items-center gap-2 font-medium"
             >
               <div className="flex size-8 items-center justify-center rounded-md">
                 <GalleryVerticalEnd className="size-6" />
               </div>
-              <span className="sr-only">E-commerce Admin</span>
+              <span className="sr-only">E-commerce Store</span>
             </a>
             <h1 className="text-xl font-bold">Create an account</h1>
             <FieldDescription>
@@ -131,7 +120,7 @@ export function SignUpForm({
             <Input
               id="email"
               type="email"
-              placeholder="m@example.com"
+              placeholder="you@example.com"
               aria-invalid={errors.email ? true : undefined}
               {...register("email")}
               disabled={isSubmitting}
@@ -146,7 +135,7 @@ export function SignUpForm({
             <Input
               id="password"
               type="password"
-              placeholder="Enter your password"
+              placeholder="Create a password"
               aria-invalid={errors.password ? true : undefined}
               {...register("password")}
               disabled={isSubmitting}
@@ -173,7 +162,14 @@ export function SignUpForm({
           
           <Field>
             <Button type="submit" variant='default' className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? "Creating account..." : "Create account"}
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating account...
+                </>
+              ) : (
+                "Create account"
+              )}
             </Button>
           </Field>
         </FieldGroup>
@@ -185,4 +181,3 @@ export function SignUpForm({
     </div>
   )
 }
-

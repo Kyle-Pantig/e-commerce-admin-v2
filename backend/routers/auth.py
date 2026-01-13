@@ -14,6 +14,10 @@ from supabase import Client
 from prisma_client import get_prisma_client
 from prisma.models import enums
 from prisma import Json
+from datetime import datetime, timezone, timedelta
+import random
+import string
+from services.email_service import send_otp_email, send_welcome_email
 from models.auth_models import (
     UserCreate,
     UserLogin,
@@ -454,61 +458,58 @@ async def signup(user_data: UserCreate, supabase: Client = Depends(get_supabase_
 async def login(user_data: UserLogin, supabase: Client = Depends(get_supabase_client)):
     """
     Login with Supabase and get access token.
-    Only approved users (or admins) can login.
+    Handles both admin/staff and customer login.
+    - Admin/Staff: Must be approved
+    - Customer: Must have verified email
     """
     try:
-        # Sign in with email and password
+        prisma = await get_prisma_client()
+        
+        # FIRST: Verify password with Supabase
         response = supabase.auth.sign_in_with_password({
             "email": user_data.email,
             "password": user_data.password
         })
-        
+
         if not response.user or not response.session:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
             )
+
+        # Password is correct - now check user status in our database
+        db_user = await prisma.user.find_first(where={"email": user_data.email})
         
-        # Check if user is approved and has admin panel access
-        try:
-            prisma = await get_prisma_client()
+        if not db_user:
             db_user = await prisma.user.find_unique(where={"id": response.user.id})
-            
-            if db_user:
-                role_str = get_role_string(db_user.role)
-                
-                # CUSTOMER role cannot access - show generic error to not reveal system info
-                if role_str == "CUSTOMER":
+
+        if db_user:
+            role_str = get_role_string(db_user.role)
+
+            # For CUSTOMER users - check email verification AFTER password is validated
+            if role_str == "CUSTOMER":
+                if not db_user.emailVerified:
                     raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid email or password"
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Please verify your email first",
+                        headers={"X-Email-Unverified": "true"}
                     )
-                
-                # Check approval status (admins are always approved)
+            else:
+                # For STAFF/ADMIN - check approval status
                 if role_str != "ADMIN" and not db_user.isApproved:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Your account is pending admin approval. Please wait for approval before signing in."
                     )
-            else:
-                # User exists in Supabase but not in database
-                # This shouldn't happen, but handle it gracefully
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Your account is pending admin approval. Please wait for approval before signing in."
-                )
-        except HTTPException:
-            # Re-raise HTTP exceptions (like approval errors)
-            raise
-        except Exception as db_error:
-            # If database check fails, deny login for security
-            # Better to be strict than allow unapproved users
-            print(f"Error checking user approval status: {str(db_error)}")
+        else:
+            # User exists in Supabase but not in database
+            # This shouldn't happen, but handle it gracefully
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Unable to verify account status. Please contact support."
+                detail="Your account is pending setup. Please contact support."
             )
-        
+
+        # Include role in response for frontend routing
         return AuthResponse(
             access_token=response.session.access_token,
             refresh_token=response.session.refresh_token,
@@ -516,7 +517,10 @@ async def login(user_data: UserLogin, supabase: Client = Depends(get_supabase_cl
             user={
                 "id": response.user.id,
                 "email": response.user.email,
-                "user_metadata": response.user.user_metadata or {}
+                "user_metadata": {
+                    **(response.user.user_metadata or {}),
+                    "role": get_role_string(db_user.role) if db_user else "CUSTOMER"
+                }
             }
         )
     except HTTPException:
@@ -980,9 +984,22 @@ async def delete_user(
             )
         
         # Delete from Supabase auth using admin client
+        # We need to find the user by email since Supabase ID may differ from our database ID
         try:
             admin_client = get_supabase_admin_client()
-            admin_client.auth.admin.delete_user(user_id)
+            
+            # Find the Supabase user by email
+            users_response = admin_client.auth.admin.list_users()
+            supabase_user = next(
+                (u for u in users_response if u.email == user.email),
+                None
+            )
+            
+            if supabase_user:
+                admin_client.auth.admin.delete_user(supabase_user.id)
+                print(f"Deleted Supabase user {supabase_user.id} ({user.email})")
+            else:
+                print(f"Warning: User {user.email} not found in Supabase Auth")
         except Exception as e:
             # Log but continue with database deletion
             print(f"Warning: Failed to delete user from Supabase: {str(e)}")
@@ -998,4 +1015,328 @@ async def delete_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete user: {str(e)}"
         )
+
+
+# ==========================================
+# OTP-Based Signup (For Customers)
+# ==========================================
+
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+
+class SignupWithOtpRequest(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str
+    phone: Optional[str] = None
+
+class VerifyOtpRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+class ResendOtpRequest(BaseModel):
+    email: EmailStr
+    type: str = "SIGNUP"  # SIGNUP or PASSWORD_RESET
+
+
+def generate_otp() -> str:
+    """Generate a 6-digit OTP code."""
+    return ''.join(random.choices(string.digits, k=6))
+
+
+@router.post("/signup-with-otp")
+async def signup_with_otp(data: SignupWithOtpRequest):
+    """
+    Start signup process:
+    1. Create user in Supabase (email_confirm: false)
+    2. Create user in our database (emailVerified: false)
+    3. Send OTP email
+    """
+    prisma = await get_prisma_client()
+    
+    # Check if email already exists in users table with verified email
+    existing_user = await prisma.user.find_first(
+        where={"email": data.email}
+    )
+    
+    if existing_user and existing_user.emailVerified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An account with this email already exists"
+        )
+    
+    # Check if there's a recent OTP for this email (rate limiting)
+    existing_otp = await prisma.otpverification.find_first(
+        where={
+            "email": data.email,
+            "type": "SIGNUP",
+            "verified": False,
+        },
+        order={"createdAt": "desc"}
+    )
+    
+    if existing_otp:
+        time_since_created = datetime.now(timezone.utc) - existing_otp.createdAt.replace(tzinfo=timezone.utc)
+        if time_since_created < timedelta(seconds=60):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Please wait before requesting a new code"
+            )
+    
+    # Create user in Supabase with email_confirm: true
+    # We track verification ourselves in our database (emailVerified field)
+    # This allows Supabase login to work, but our backend checks emailVerified
+    admin_client = get_supabase_admin_client()
+    
+    try:
+        # Check if user exists in Supabase
+        supabase_users = admin_client.auth.admin.list_users()
+        supabase_user = next((u for u in supabase_users if u.email == data.email), None)
+        
+        if supabase_user:
+            # User exists in Supabase - update password
+            admin_client.auth.admin.update_user_by_id(
+                supabase_user.id,
+                {
+                    "password": data.password,
+                    "user_metadata": {"full_name": data.full_name},
+                }
+            )
+            supabase_id = supabase_user.id
+        else:
+            # Create new user in Supabase (email confirmed in Supabase)
+            # We handle our own email verification via OTP in our database
+            response = admin_client.auth.admin.create_user({
+                "email": data.email,
+                "password": data.password,
+                "email_confirm": True,  # Allow Supabase login - we check emailVerified in our DB
+                "user_metadata": {"full_name": data.full_name}
+            })
+            supabase_id = response.user.id
+    except Exception as e:
+        print(f"Supabase user creation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create account. Please try again."
+        )
+    
+    # Create or update user in our database
+    if not existing_user:
+        try:
+            await prisma.user.create(
+                data={
+                    "id": supabase_id,
+                    "email": data.email,
+                    "fullName": data.full_name,
+                    "phone": data.phone,
+                    "role": "CUSTOMER",
+                    "isApproved": True,  # Customers are auto-approved after OTP
+                    "emailVerified": False,
+                }
+            )
+        except Exception as e:
+            print(f"Error creating user in database: {e}")
+            # May already exist, try to update
+            existing_user = await prisma.user.find_first(where={"email": data.email})
+    
+    if existing_user:
+        # Update existing unverified user
+        await prisma.user.update(
+            where={"id": existing_user.id},
+            data={
+                "fullName": data.full_name,
+                "phone": data.phone,
+            }
+        )
+    
+    # Delete old OTP records for this email
+    await prisma.otpverification.delete_many(
+        where={"email": data.email, "type": "SIGNUP"}
+    )
+    
+    # Generate OTP
+    otp_code = generate_otp()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    
+    # Store OTP
+    await prisma.otpverification.create(
+        data={
+            "email": data.email,
+            "code": otp_code,
+            "type": "SIGNUP",
+            "expiresAt": expires_at,
+            "verified": False,
+            "attempts": 0,
+        }
+    )
+    
+    # Send OTP email
+    email_sent = await send_otp_email(data.email, otp_code, "SIGNUP")
+    
+    if not email_sent:
+        print(f"Warning: Failed to send OTP email to {data.email}")
+    
+    return {
+        "message": "Verification code sent to your email",
+        "email": data.email,
+        "expires_in_minutes": 10,
+    }
+
+
+@router.post("/verify-otp")
+async def verify_otp(data: VerifyOtpRequest):
+    """
+    Verify OTP and complete signup.
+    Confirms the email in Supabase after successful verification.
+    """
+    prisma = await get_prisma_client()
+    
+    # Find the OTP record
+    otp_record = await prisma.otpverification.find_first(
+        where={
+            "email": data.email,
+            "type": "SIGNUP",
+            "verified": False,
+        },
+        order={"createdAt": "desc"}
+    )
+    
+    if not otp_record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No pending verification found. Please sign up again."
+        )
+    
+    # Check if expired
+    if otp_record.expiresAt.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code has expired. Please request a new one."
+        )
+    
+    # Check attempts
+    if otp_record.attempts >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Too many failed attempts. Please request a new code."
+        )
+    
+    # Verify code
+    if otp_record.code != data.code:
+        # Increment attempts
+        await prisma.otpverification.update(
+            where={"id": otp_record.id},
+            data={"attempts": otp_record.attempts + 1}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code"
+        )
+    
+    # Delete all OTP records for this email (cleanup)
+    await prisma.otpverification.delete_many(
+        where={"email": data.email, "type": "SIGNUP"}
+    )
+    
+    # Get user from database
+    user = await prisma.user.find_first(where={"email": data.email})
+    
+    # Confirm email in Supabase
+    try:
+        admin_client = get_supabase_admin_client()
+        if user:
+            admin_client.auth.admin.update_user_by_id(
+                user.id,
+                {"email_confirm": True}
+            )
+    except Exception as e:
+        print(f"Warning: Failed to confirm email in Supabase: {e}")
+    
+    # Update user as email verified in our database
+    if user:
+        await prisma.user.update(
+            where={"id": user.id},
+            data={
+                "emailVerified": True,
+                "emailVerifiedAt": datetime.now(timezone.utc),
+            }
+        )
+        
+        # Send welcome email
+        await send_welcome_email(data.email, user.fullName)
+    
+    return {
+        "message": "Email verified successfully! You can now log in.",
+        "verified": True,
+    }
+
+
+@router.post("/resend-otp")
+async def resend_otp(data: ResendOtpRequest):
+    """
+    Resend OTP code.
+    """
+    prisma = await get_prisma_client()
+    
+    # Check if user exists
+    user = await prisma.user.find_first(where={"email": data.email})
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email"
+        )
+    
+    if data.type == "SIGNUP" and user.emailVerified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already verified"
+        )
+    
+    # Check rate limit
+    last_otp = await prisma.otpverification.find_first(
+        where={
+            "email": data.email,
+            "type": data.type,
+        },
+        order={"createdAt": "desc"}
+    )
+    
+    if last_otp:
+        time_since_created = datetime.now(timezone.utc) - last_otp.createdAt.replace(tzinfo=timezone.utc)
+        if time_since_created < timedelta(seconds=60):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Please wait before requesting a new code"
+            )
+    
+    # Delete old OTP records for this email and type
+    await prisma.otpverification.delete_many(
+        where={"email": data.email, "type": data.type}
+    )
+    
+    # Generate new OTP
+    otp_code = generate_otp()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    
+    # Create new OTP record
+    await prisma.otpverification.create(
+        data={
+            "email": data.email,
+            "code": otp_code,
+            "type": data.type,
+            "expiresAt": expires_at,
+            "verified": False,
+            "attempts": 0,
+        }
+    )
+    
+    # Send OTP email
+    await send_otp_email(data.email, otp_code, data.type)
+    
+    return {
+        "message": "Verification code sent to your email",
+        "email": data.email,
+        "expires_in_minutes": 10,
+    }
 
