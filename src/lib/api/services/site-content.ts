@@ -1,16 +1,90 @@
 import { apiClient } from "../client"
 
+// Button for banner CTA
+export interface BannerButton {
+  text: string
+  link: string
+  variant?: "primary" | "secondary"
+}
+
+// Size options
+export type TextSize = "sm" | "md" | "lg" | "xl"
+export type ButtonSize = "sm" | "md" | "lg"
+
 // Banner item for hero slider
 export interface BannerItem {
   id: string
   image_url: string
   title?: string
+  title_color?: string
+  title_size?: TextSize
   subtitle?: string
+  subtitle_color?: string
+  subtitle_size?: TextSize
+  content_align?: "left" | "center" | "right"
+  button_size?: ButtonSize
+  buttons?: BannerButton[]
+  // Legacy fields (for backward compatibility)
   button_text?: string
   button_link?: string
   is_active: boolean
   order: number
 }
+
+// Helper to get normalized buttons (handles legacy format)
+export function getBannerButtons(banner: BannerItem): BannerButton[] {
+  // If new buttons array exists, use it
+  if (banner.buttons && banner.buttons.length > 0) {
+    return banner.buttons
+  }
+  // Fallback to legacy single button
+  if (banner.button_text) {
+    return [{ text: banner.button_text, link: banner.button_link || "", variant: "primary" }]
+  }
+  return []
+}
+
+// Size class helpers for responsive design
+export const titleSizeClasses = {
+  sm: "text-xl md:text-2xl lg:text-3xl",
+  md: "text-2xl md:text-4xl lg:text-5xl",
+  lg: "text-3xl md:text-5xl lg:text-6xl",
+  xl: "text-4xl md:text-6xl lg:text-7xl",
+} as const
+
+export const subtitleSizeClasses = {
+  sm: "text-sm md:text-base",
+  md: "text-base md:text-lg",
+  lg: "text-lg md:text-xl",
+  xl: "text-xl md:text-2xl",
+} as const
+
+export const buttonSizeClasses = {
+  sm: "px-4 py-2 text-sm",
+  md: "px-6 py-3 text-base",
+  lg: "px-8 py-4 text-lg",
+} as const
+
+// Preview-specific size classes (smaller for editor preview)
+export const previewTitleSizeClasses = {
+  sm: "text-base",
+  md: "text-lg",
+  lg: "text-xl",
+  xl: "text-2xl",
+} as const
+
+export const previewSubtitleSizeClasses = {
+  sm: "text-xs",
+  md: "text-sm",
+  lg: "text-base",
+  xl: "text-lg",
+} as const
+
+export const previewButtonSizeClasses = {
+  sm: "px-2 py-1 text-xs",
+  md: "px-3 py-1.5 text-xs",
+  lg: "px-4 py-2 text-sm",
+} as const
 
 // Hero banners content structure
 export interface HeroBannersContent {
@@ -124,8 +198,8 @@ export const siteContentApi = {
     return apiClient.post<SiteContent>(`/site-content/${key}/toggle`)
   },
 
-  // Get public content (no auth)
+  // Get public content (no auth required)
   getPublic: async (key: string): Promise<{ content: unknown }> => {
-    return apiClient.get<{ content: unknown }>(`/site-content/public/${key}`)
+    return apiClient.get<{ content: unknown }>(`/site-content/public/${key}`, { skipAuth: true })
   },
 }

@@ -152,6 +152,7 @@ export interface ProductVariant {
   name: string
   price: number | null
   sale_price: number | null
+  cost_price: number | null
   stock: number
   low_stock_threshold: number | null
   is_active: boolean
@@ -221,6 +222,7 @@ export interface ProductListItem {
   is_new: boolean
   new_until: string | null
   primary_image: string | null
+  images: { url: string; alt_text: string | null; is_primary?: boolean; display_order?: number }[] | null
   variants: {
     id: string
     name: string
@@ -247,6 +249,7 @@ export interface ProductVariantCreate {
   name: string
   price?: number | null
   sale_price?: number | null
+  cost_price?: number | null
   stock?: number
   low_stock_threshold?: number | null
   is_active?: boolean
@@ -318,6 +321,7 @@ export type PermissionModule =
   | "attributes" 
   | "analytics" 
   | "users"
+  | "discounts"
 
 export type StaffPermissions = {
   [K in PermissionModule]?: PermissionLevel
@@ -331,6 +335,7 @@ export const DEFAULT_STAFF_PERMISSIONS: StaffPermissions = {
   attributes: "view",
   analytics: "view",
   users: "none",
+  discounts: "view",
 }
 
 export const PERMISSION_MODULES: PermissionModule[] = [
@@ -341,6 +346,7 @@ export const PERMISSION_MODULES: PermissionModule[] = [
   "attributes",
   "analytics",
   "users",
+  "discounts",
 ]
 
 export const PERMISSION_LABELS: Record<PermissionModule, string> = {
@@ -351,6 +357,7 @@ export const PERMISSION_LABELS: Record<PermissionModule, string> = {
   attributes: "Attributes",
   analytics: "Analytics",
   users: "Users",
+  discounts: "Discounts",
 }
 
 export interface User {

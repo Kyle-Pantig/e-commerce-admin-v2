@@ -59,6 +59,7 @@ class ProductVariantCreate(BaseModel):
     name: str  # e.g., "Red - Large"
     price: Optional[float] = None
     sale_price: Optional[float] = None
+    cost_price: Optional[float] = None
     stock: int = 0
     low_stock_threshold: Optional[int] = None
     is_active: bool = True
@@ -72,6 +73,7 @@ class ProductVariantUpdate(BaseModel):
     name: Optional[str] = None
     price: Optional[float] = None
     sale_price: Optional[float] = None
+    cost_price: Optional[float] = None
     stock: Optional[int] = None
     low_stock_threshold: Optional[int] = None
     is_active: Optional[bool] = None
@@ -87,6 +89,7 @@ class ProductVariantResponse(BaseModel):
     name: str
     price: Optional[float] = None
     sale_price: Optional[float] = None
+    cost_price: Optional[float] = None
     stock: int
     low_stock_threshold: Optional[int] = None
     is_active: bool
@@ -289,6 +292,14 @@ class ProductVariantListItem(BaseModel):
         from_attributes = True
 
 
+class ProductListImageItem(BaseModel):
+    """Minimal image data for product list."""
+    url: str
+    alt_text: Optional[str] = None
+    is_primary: bool = False
+    display_order: int = 0
+
+
 class ProductListResponse(BaseModel):
     """Response model for product list with minimal data."""
     id: str
@@ -306,6 +317,7 @@ class ProductListResponse(BaseModel):
     is_new: bool = False
     new_until: Optional[str] = None
     primary_image: Optional[str] = None
+    images: Optional[List[ProductListImageItem]] = None  # All images for slideshow
     variants: Optional[List["ProductVariantListItem"]] = None  # For stock calculation
     created_at: str
     updated_at: str

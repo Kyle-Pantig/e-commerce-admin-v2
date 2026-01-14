@@ -25,13 +25,22 @@ export interface CategoryListParams {
 
 export const categoriesApi = {
   /**
-   * List all categories
+   * List all categories (requires auth)
    * @param params - Filter parameters
    * @returns Array of categories (tree structure)
    */
   list: (params: CategoryListParams = {}): Promise<Category[]> => {
     const query = buildQueryString(params as Record<string, unknown>)
     return apiClient.get<Category[]>(`/categories${query}`)
+  },
+
+  /**
+   * List all active categories (public, no auth required)
+   * For store frontend to display categories
+   * @returns Array of active categories (tree structure)
+   */
+  listPublic: (): Promise<Category[]> => {
+    return apiClient.get<Category[]>("/categories/public", { skipAuth: true })
   },
 
   /**

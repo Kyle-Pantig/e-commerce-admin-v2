@@ -14,7 +14,7 @@ export default async function LoginPage({
 
   // Redirect if already logged in
   if (user) {
-    redirect("/dashboard")
+    redirect("/")
   }
 
   const params = await searchParams
@@ -26,12 +26,5 @@ export default async function LoginPage({
     errorMessage = "Your session has expired. Please sign in again."
   }
 
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md">
-        <LoginForm errorMessage={errorMessage} />
-      </div>
-    </div>
-  )
+  return <LoginForm errorMessage={errorMessage} />
 }
-

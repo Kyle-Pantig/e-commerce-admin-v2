@@ -99,8 +99,14 @@ export default function EditProductPage({ params }: EditProductPageProps) {
     mutationFn: (data: any) => productsApi.update(product!.id, data),
     onSuccess: () => {
       toast.success("Product updated successfully")
+      // Invalidate admin queries
       queryClient.invalidateQueries({ queryKey: ["products"] })
       queryClient.invalidateQueries({ queryKey: ["product", "slug", slug] })
+      queryClient.invalidateQueries({ queryKey: ["product", slug] }) // Admin product view
+      // Invalidate public/store queries
+      queryClient.invalidateQueries({ queryKey: ["products", "public"] })
+      queryClient.invalidateQueries({ queryKey: ["product", "public", slug] })
+      queryClient.invalidateQueries({ queryKey: ["products", "related"] }) // Related products
       router.push("/products")
     },
     onError: (error: Error) => {

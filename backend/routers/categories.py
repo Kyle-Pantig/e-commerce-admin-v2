@@ -109,6 +109,72 @@ async def create_category(
         )
 
 
+@router.get("/public", response_model=List[CategoryResponse])
+async def list_public_categories():
+    """
+    List all active categories (public endpoint, no auth required).
+    For store frontend to display categories.
+    """
+    try:
+        prisma = await get_prisma_client()
+        
+        # Only fetch active categories
+        where_clause = {"isActive": True}
+        
+        # Fetch all categories with DB-level sorting
+        categories = await prisma.category.find_many(
+            where=where_clause,
+            include={
+                "children": {
+                    "where": where_clause,
+                    "order_by": [
+                        {"displayOrder": "asc"},
+                        {"name": "asc"}
+                    ]
+                }
+            },
+            order=[
+                {"displayOrder": "asc"},
+                {"name": "asc"}
+            ]
+        )
+        
+        # Build response with nested children
+        def build_category_response(category):
+            created_at_str = category.createdAt.isoformat() if category.createdAt else ""
+            updated_at_str = category.updatedAt.isoformat() if category.updatedAt else ""
+            
+            children = None
+            if hasattr(category, 'children') and category.children:
+                children = [build_category_response(child) for child in category.children]
+            
+            return CategoryResponse(
+                id=category.id,
+                name=category.name,
+                slug=category.slug,
+                description=category.description,
+                image=category.image,
+                parent_id=category.parentId,
+                display_order=category.displayOrder,
+                is_active=category.isActive,
+                created_at=created_at_str,
+                updated_at=updated_at_str,
+                children=children,
+            )
+        
+        # Only return root categories (parentId is null) - tree structure
+        result = [build_category_response(cat) for cat in categories if not cat.parentId]
+        
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch categories: {str(e)}"
+        )
+
+
 @router.get("", response_model=List[CategoryResponse])
 async def list_categories(
     include_inactive: bool = False,

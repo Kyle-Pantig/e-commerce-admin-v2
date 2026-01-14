@@ -40,7 +40,7 @@ export { attributesApi } from "./services/attributes"
 export type { AttributeListParams, AttributeByCategoryParams } from "./services/attributes"
 
 export { productsApi } from "./services/products"
-export type { ProductListResponse } from "./services/products"
+export type { ProductListResponse, PublicProductListParams } from "./services/products"
 
 export { usersApi, authApi } from "./services/users"
 
@@ -105,8 +105,21 @@ export type {
   TaxCalculationResponse,
 } from "./services/tax"
 
-export { siteContentApi, CONTENT_KEYS } from "./services/site-content"
+export { 
+  siteContentApi, 
+  CONTENT_KEYS, 
+  getBannerButtons,
+  titleSizeClasses,
+  subtitleSizeClasses,
+  buttonSizeClasses,
+  previewTitleSizeClasses,
+  previewSubtitleSizeClasses,
+  previewButtonSizeClasses,
+} from "./services/site-content"
 export type {
+  TextSize,
+  ButtonSize,
+  BannerButton,
   BannerItem,
   HeroBannersContent,
   AnnouncementContent,

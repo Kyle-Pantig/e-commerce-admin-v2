@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import {
@@ -13,15 +13,20 @@ import {
 import { Badge } from "@/components/ui/badge"
 import {
   IconPlayerPlay,
-  IconChevronLeft,
-  IconChevronRight,
   IconEye,
   IconDeviceDesktop,
   IconDeviceMobile,
   IconX,
 } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
-import type { BannerItem, HeroBannersContent } from "@/lib/api"
+import { 
+  getBannerButtons, 
+  titleSizeClasses,
+  subtitleSizeClasses,
+  buttonSizeClasses,
+  type BannerItem, 
+  type HeroBannersContent 
+} from "@/lib/api"
 
 interface BannerPreviewProps {
   content: HeroBannersContent
@@ -33,6 +38,12 @@ export function BannerPreview({ content, pendingFiles }: BannerPreviewProps) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(content.autoplay)
   const [viewMode, setViewMode] = useState<"desktop" | "mobile">("desktop")
+  
+  // Drag/swipe state
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragStart, setDragStart] = useState(0)
+  const [dragOffset, setDragOffset] = useState(0)
+  const carouselRef = useRef<HTMLDivElement>(null)
 
   // Filter active banners only
   const activeBanners = content.banners.filter(b => b.is_active)
@@ -45,16 +56,16 @@ export function BannerPreview({ content, pendingFiles }: BannerPreviewProps) {
     return banner.image_url
   }, [pendingFiles])
 
-  // Auto-advance slides
+  // Auto-advance slides (pause while dragging)
   useEffect(() => {
-    if (!isOpen || !isPlaying || activeBanners.length <= 1) return
+    if (!isOpen || !isPlaying || activeBanners.length <= 1 || isDragging) return
 
     const interval = setInterval(() => {
       setCurrentIndex(prev => (prev + 1) % activeBanners.length)
     }, content.autoplay_interval)
 
     return () => clearInterval(interval)
-  }, [isOpen, isPlaying, activeBanners.length, content.autoplay_interval])
+  }, [isOpen, isPlaying, activeBanners.length, content.autoplay_interval, isDragging])
 
   // Reset on open
   useEffect(() => {
@@ -68,12 +79,65 @@ export function BannerPreview({ content, pendingFiles }: BannerPreviewProps) {
     setCurrentIndex(index)
   }
 
-  const goToPrev = () => {
-    setCurrentIndex(prev => (prev - 1 + activeBanners.length) % activeBanners.length)
+  // Handle drag/swipe
+  const handleDragStart = (clientX: number) => {
+    setIsDragging(true)
+    setDragStart(clientX)
+    setDragOffset(0)
   }
 
-  const goToNext = () => {
-    setCurrentIndex(prev => (prev + 1) % activeBanners.length)
+  const handleDragMove = (clientX: number) => {
+    if (!isDragging) return
+    const offset = clientX - dragStart
+    setDragOffset(offset)
+  }
+
+  const handleDragEnd = () => {
+    if (!isDragging) return
+    setIsDragging(false)
+    
+    const threshold = 50 // Minimum drag distance to trigger slide change
+    
+    if (dragOffset > threshold && currentIndex > 0) {
+      // Dragged right - go to previous
+      setCurrentIndex(prev => prev - 1)
+    } else if (dragOffset < -threshold && currentIndex < activeBanners.length - 1) {
+      // Dragged left - go to next
+      setCurrentIndex(prev => prev + 1)
+    }
+    
+    setDragOffset(0)
+  }
+
+  // Mouse events
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    handleDragStart(e.clientX)
+  }
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    handleDragMove(e.clientX)
+  }
+
+  const handleMouseUp = () => {
+    handleDragEnd()
+  }
+
+  const handleMouseLeave = () => {
+    if (isDragging) handleDragEnd()
+  }
+
+  // Touch events
+  const handleTouchStart = (e: React.TouchEvent) => {
+    handleDragStart(e.touches[0].clientX)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    handleDragMove(e.touches[0].clientX)
+  }
+
+  const handleTouchEnd = () => {
+    handleDragEnd()
   }
 
   if (activeBanners.length === 0) {
@@ -165,14 +229,29 @@ export function BannerPreview({ content, pendingFiles }: BannerPreviewProps) {
             )}
 
             {/* Banner Carousel */}
-            <div className={cn(
-              "relative overflow-hidden",
-              viewMode === "desktop" ? "aspect-[16/7]" : "aspect-[4/3]"
-            )}>
+            <div 
+              ref={carouselRef}
+              className={cn(
+                "relative overflow-hidden cursor-grab active:cursor-grabbing select-none",
+                viewMode === "desktop" ? "aspect-[16/7]" : "aspect-[4/3]"
+              )}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
               {/* Slides */}
               <div 
-                className="flex transition-transform duration-500 ease-out h-full"
-                style={{ transform: `translateX(-${currentIndex * 100}%)` }}
+                className={cn(
+                  "flex h-full",
+                  !isDragging && "transition-transform duration-500 ease-out"
+                )}
+                style={{ 
+                  transform: `translateX(calc(-${currentIndex * 100}% + ${dragOffset}px))` 
+                }}
               >
                 {activeBanners.map((banner) => {
                   const imageUrl = getImageUrl(banner)
@@ -193,36 +272,61 @@ export function BannerPreview({ content, pendingFiles }: BannerPreviewProps) {
                       )}
                       
                       {/* Content Overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent">
                         <div className={cn(
-                          "absolute text-white",
-                          viewMode === "desktop" 
-                            ? "bottom-12 left-12 right-12" 
-                            : "bottom-8 left-4 right-4"
+                          "absolute inset-0 flex flex-col justify-center px-6",
+                          banner.content_align === "left" && "items-start text-left",
+                          banner.content_align === "right" && "items-end text-right",
+                          (!banner.content_align || banner.content_align === "center") && "items-center text-center"
                         )}>
                           {banner.title && (
-                            <h2 className={cn(
-                              "font-bold mb-2 drop-shadow-lg",
-                              viewMode === "desktop" ? "text-4xl" : "text-xl"
-                            )}>
+                            <h2 
+                              className={cn(
+                                "font-bold drop-shadow-lg mb-3",
+                                viewMode === "desktop" 
+                                  ? titleSizeClasses[banner.title_size || "lg"]
+                                  : "text-xl"
+                              )}
+                              style={{ color: banner.title_color || "#ffffff" }}
+                            >
                               {banner.title}
                             </h2>
                           )}
                           {banner.subtitle && (
-                            <p className={cn(
-                              "opacity-90 mb-4 drop-shadow",
-                              viewMode === "desktop" ? "text-lg" : "text-sm"
-                            )}>
+                            <p 
+                              className={cn(
+                                "drop-shadow max-w-2xl mb-6",
+                                viewMode === "desktop" 
+                                  ? subtitleSizeClasses[banner.subtitle_size || "md"]
+                                  : "text-sm"
+                              )}
+                              style={{ color: banner.subtitle_color || "#ffffff", opacity: 0.9 }}
+                            >
                               {banner.subtitle}
                             </p>
                           )}
-                          {banner.button_text && (
-                            <button className={cn(
-                              "bg-white text-black font-semibold rounded-lg transition-transform hover:scale-105",
-                              viewMode === "desktop" ? "px-6 py-3" : "px-4 py-2 text-sm"
+                          {getBannerButtons(banner).length > 0 && (
+                            <div className={cn(
+                              "flex gap-3",
+                              viewMode === "mobile" && "flex-col gap-2"
                             )}>
-                              {banner.button_text}
-                            </button>
+                              {getBannerButtons(banner).map((btn, btnIdx) => (
+                                <button
+                                  key={btnIdx}
+                                  className={cn(
+                                    "font-medium rounded-md shadow transition-colors",
+                                    btn.variant === "primary"
+                                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                                      : "border border-input bg-background text-foreground hover:bg-accent hover:text-accent-foreground",
+                                    viewMode === "desktop" 
+                                      ? buttonSizeClasses[banner.button_size || "md"]
+                                      : "px-5 py-2 text-sm"
+                                  )}
+                                >
+                                  {btn.text || `Button ${btnIdx + 1}`}
+                                </button>
+                              ))}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -231,46 +335,30 @@ export function BannerPreview({ content, pendingFiles }: BannerPreviewProps) {
                 })}
               </div>
 
-              {/* Navigation Arrows */}
-              {activeBanners.length > 1 && (
-                <>
-                  <button
-                    onClick={goToPrev}
-                    className={cn(
-                      "absolute left-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all hover:scale-110",
-                      viewMode === "desktop" ? "p-3" : "p-2"
-                    )}
-                  >
-                    <IconChevronLeft className={viewMode === "desktop" ? "h-6 w-6" : "h-4 w-4"} />
-                  </button>
-                  <button
-                    onClick={goToNext}
-                    className={cn(
-                      "absolute right-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all hover:scale-110",
-                      viewMode === "desktop" ? "p-3" : "p-2"
-                    )}
-                  >
-                    <IconChevronRight className={viewMode === "desktop" ? "h-6 w-6" : "h-4 w-4"} />
-                  </button>
-                </>
-              )}
-
               {/* Dots Navigation */}
               {activeBanners.length > 1 && (
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-                  {activeBanners.map((_, index) => (
-                    <button
-                      key={index}
-                      onClick={() => goToSlide(index)}
-                      className={cn(
-                        "rounded-full transition-all",
-                        viewMode === "desktop" ? "w-3 h-3" : "w-2 h-2",
-                        currentIndex === index
-                          ? "bg-white scale-110"
-                          : "bg-white/50 hover:bg-white/75"
-                      )}
-                    />
-                  ))}
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
+                  <div className="flex gap-2">
+                    {activeBanners.map((_, index) => (
+                      <button
+                        key={index}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          goToSlide(index)
+                        }}
+                        className={cn(
+                          "rounded-full transition-all",
+                          viewMode === "desktop" ? "w-3 h-3" : "w-2 h-2",
+                          currentIndex === index
+                            ? "bg-white scale-110"
+                            : "bg-white/50 hover:bg-white/75"
+                        )}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-white/60 text-[10px] font-medium tracking-wide">
+                    Swipe or drag to navigate
+                  </span>
                 </div>
               )}
             </div>

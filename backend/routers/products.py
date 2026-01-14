@@ -79,6 +79,7 @@ def build_product_response(product, include_details: bool = True) -> ProductResp
                     name=var.name,
                     price=var.price,
                     sale_price=var.salePrice,
+                    cost_price=var.costPrice,
                     stock=var.stock,
                     low_stock_threshold=var.lowStockThreshold,
                     is_active=var.isActive,
@@ -146,12 +147,18 @@ def build_product_response(product, include_details: bool = True) -> ProductResp
 def build_product_list_response(product) -> ProductListResponse:
     """Build ProductListResponse from Prisma product object"""
     primary_image = None
+    images = None
     if product.images:
         primary = next((img for img in product.images if img.isPrimary), None)
         if primary:
             primary_image = primary.url
         elif product.images:
             primary_image = product.images[0].url
+        # Include all images for slideshow (sorted by display order already from query)
+        images = [
+            {"url": img.url, "alt_text": img.altText, "is_primary": img.isPrimary, "display_order": img.displayOrder}
+            for img in product.images
+        ]
     
     category_name = None
     if product.category:
@@ -189,10 +196,156 @@ def build_product_list_response(product) -> ProductListResponse:
         is_new=product.isNew,
         new_until=product.newUntil.isoformat() if product.newUntil else None,
         primary_image=primary_image,
+        images=images,
         variants=variants,
         created_at=product.createdAt.isoformat() if product.createdAt else "",
         updated_at=product.updatedAt.isoformat() if product.updatedAt else "",
     )
+
+
+@router.get("/public", response_model=PaginatedProductResponse)
+async def list_public_products(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    category_slug: Optional[str] = None,
+    is_featured: Optional[bool] = None,
+    search: Optional[str] = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+):
+    """
+    List active products (public endpoint, no auth required).
+    Supports filtering by category slug (includes child categories).
+    """
+    try:
+        prisma = await get_prisma_client()
+        
+        # Build where clause - only active products
+        where = {"status": "ACTIVE"}
+        
+        # If category slug provided, get category and all its descendants
+        if category_slug:
+            # Find the category by slug
+            category = await prisma.category.find_unique(
+                where={"slug": category_slug},
+                include={"children": {"include": {"children": True}}}
+            )
+            
+            if category:
+                # Collect all category IDs (parent + all descendants)
+                def collect_category_ids(cat, ids=None):
+                    if ids is None:
+                        ids = []
+                    ids.append(cat.id)
+                    if hasattr(cat, 'children') and cat.children:
+                        for child in cat.children:
+                            collect_category_ids(child, ids)
+                    return ids
+                
+                category_ids = collect_category_ids(category)
+                where["categoryId"] = {"in": category_ids}
+        
+        if is_featured is not None:
+            where["isFeatured"] = is_featured
+        
+        if search:
+            where["OR"] = [
+                {"name": {"contains": search, "mode": "insensitive"}},
+                {"description": {"contains": search, "mode": "insensitive"}},
+            ]
+        
+        # Map sort fields
+        sort_field_map = {
+            "created_at": "createdAt",
+            "updated_at": "updatedAt",
+            "name": "name",
+            "base_price": "basePrice",
+            "price": "basePrice",
+            "newest": "createdAt",
+        }
+        sort_field = sort_field_map.get(sort_by, "createdAt")
+        
+        # Get total count
+        total = await prisma.product.count(where=where)
+        
+        # Calculate pagination
+        skip = (page - 1) * per_page
+        total_pages = math.ceil(total / per_page) if total > 0 else 1
+        
+        # Fetch products
+        products = await prisma.product.find_many(
+            where=where,
+            include={
+                "category": True,
+                "images": {"order_by": {"displayOrder": "asc"}},
+                "variants": True,
+            },
+            order={sort_field: sort_order},
+            skip=skip,
+            take=per_page,
+        )
+        
+        items = [build_product_list_response(p) for p in products]
+        
+        return PaginatedProductResponse(
+            items=items,
+            total=total,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch products: {str(e)}"
+        )
+
+
+@router.get("/public/{slug}", response_model=ProductResponse)
+async def get_public_product_by_slug(slug: str):
+    """
+    Get a single product by slug (public endpoint, no auth required).
+    Only returns active products.
+    """
+    try:
+        prisma = await get_prisma_client()
+        
+        product = await prisma.product.find_unique(
+            where={"slug": slug},
+            include={
+                "category": True,
+                "images": {"order_by": {"displayOrder": "asc"}},
+                "variants": {"order_by": {"createdAt": "asc"}},
+                "attributeValues": {
+                    "include": {"attribute": True}
+                },
+            }
+        )
+        
+        if not product:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+        
+        if product.status != "ACTIVE":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+        
+        return build_product_response(product)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch product: {str(e)}"
+        )
 
 
 @router.get("", response_model=PaginatedProductResponse)
@@ -434,6 +587,7 @@ async def create_product(
                     "name": var.name,
                     "price": var.price,
                     "salePrice": var.sale_price,
+                    "costPrice": var.cost_price,
                     "stock": var.stock,
                     "lowStockThreshold": var.low_stock_threshold,
                     "isActive": var.is_active,
@@ -562,7 +716,7 @@ async def update_product(
         
         # Track stock changes for adjustments
         stock_adjustments = []
-        adjusted_by = current_admin.email if hasattr(current_admin, 'email') else current_admin.id
+        adjusted_by = current_user.email if hasattr(current_user, 'email') else current_user.id
         
         # Check if product stock changed (for non-variant products)
         if product_data.stock is not None and product_data.stock != existing.stock:
@@ -632,6 +786,7 @@ async def update_product(
                     "name": var.name,
                     "price": var.price,
                     "salePrice": var.sale_price,
+                    "costPrice": var.cost_price,
                     "stock": var.stock,
                     "lowStockThreshold": var.low_stock_threshold,
                     "isActive": var.is_active,

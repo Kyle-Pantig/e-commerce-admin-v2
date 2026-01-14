@@ -334,19 +334,20 @@ model ProductVariant {
   name              String   // e.g., "Red - Large"
   price             Float?   // Override price for this variant
   salePrice         Float?   @map("sale_price")
+  costPrice         Float?   @map("cost_price")
   stock             Int      @default(0)
   lowStockThreshold Int?     @map("low_stock_threshold")
   isActive          Boolean  @default(true) @map("is_active")
-  
+
   // Variant options stored as JSON: {"color": "Red", "size": "Large"}
   options           Json?    // JSON object of option key-value pairs
-  
+
   // Image for this specific variant
   imageUrl          String?  @map("image_url")
-  
+
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
-  
+
   // Relations
   product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   orderItems        OrderItem[]

@@ -35,6 +35,17 @@ export type ProductListResponse = PaginatedResponse<ProductListItem>
 // API Service
 // =============================================================================
 
+// Public product list params (for store)
+export interface PublicProductListParams {
+  page?: number
+  per_page?: number
+  category_slug?: string
+  is_featured?: boolean
+  search?: string
+  sort_by?: "created_at" | "name" | "base_price" | "price" | "newest"
+  sort_order?: "asc" | "desc"
+}
+
 export const productsApi = {
   /**
    * List products with pagination and filters
@@ -48,6 +59,28 @@ export const productsApi = {
       ...params,
     } as Record<string, unknown>)
     return apiClient.get<ProductListResponse>(`/products${query}`)
+  },
+
+  /**
+   * List active products (public, no auth required)
+   * Supports filtering by category slug (includes child categories)
+   * @param params - Query parameters
+   */
+  listPublic: (params: PublicProductListParams = {}): Promise<ProductListResponse> => {
+    const query = buildQueryString({
+      page: params.page ?? 1,
+      per_page: params.per_page ?? 20,
+      ...params,
+    } as Record<string, unknown>)
+    return apiClient.get<ProductListResponse>(`/products/public${query}`, { skipAuth: true })
+  },
+
+  /**
+   * Get a single product by slug (public, no auth required)
+   * @param slug - Product slug
+   */
+  getPublicBySlug: (slug: string): Promise<Product> => {
+    return apiClient.get<Product>(`/products/public/${slug}`, { skipAuth: true })
   },
 
   /**

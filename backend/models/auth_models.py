@@ -34,6 +34,7 @@ PERMISSION_MODULES = [
     "attributes",   # Attribute management
     "analytics",    # Analytics and reports
     "users",        # User management (view only for staff)
+    "discounts",    # Discount codes management
 ]
 
 # Default permissions for new staff users (view-only for everything)
@@ -45,6 +46,7 @@ DEFAULT_STAFF_PERMISSIONS = {
     "attributes": "view",
     "analytics": "view",
     "users": "none",
+    "discounts": "view",
 }
 
 

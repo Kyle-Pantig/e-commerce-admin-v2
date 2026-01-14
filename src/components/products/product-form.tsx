@@ -135,6 +135,7 @@ interface LocalVariant {
   sku: string
   price: number
   sale_price?: number
+  cost_price?: number
   stock: number
   low_stock_threshold?: number
   is_active: boolean
@@ -344,6 +345,7 @@ export function ProductForm({
         sku: v.sku || "",
         price: v.price || 0,
         sale_price: v.sale_price || undefined,
+        cost_price: v.cost_price || undefined,
         stock: v.stock,
         low_stock_threshold: v.low_stock_threshold || undefined,
         is_active: v.is_active,
@@ -716,18 +718,20 @@ export function ProductForm({
       sku: v.sku || "",
       price: v.price || 0,
       sale_price: v.sale_price ?? null,
+      cost_price: v.cost_price ?? null,
       stock: v.stock,
       low_stock_threshold: v.low_stock_threshold ?? null,
       is_active: v.is_active,
       options: (v.options as Record<string, string>) || {}
     }))
-    
+
     const currentVariants = variants.map(v => ({
       id: v.id,
       name: v.name,
       sku: v.sku || "",
       price: v.price || 0,
       sale_price: v.sale_price ?? null,
+      cost_price: v.cost_price ?? null,
       stock: v.stock,
       low_stock_threshold: v.low_stock_threshold ?? null,
       is_active: v.is_active,
@@ -764,6 +768,7 @@ export function ProductForm({
         sku: variant.sku,
         price: variant.price,
         sale_price: variant.sale_price,
+        cost_price: variant.cost_price,
         stock: variant.stock,
         low_stock_threshold: variant.low_stock_threshold,
         is_active: variant.is_active,
@@ -944,6 +949,7 @@ export function ProductForm({
       name: "",
       sku: "",
       price: form.getValues("base_price") || 0,
+      cost_price: form.getValues("cost_price") || undefined,
       stock: 0,
       is_active: true,
       options: {},
@@ -1072,6 +1078,7 @@ export function ProductForm({
 
     const combinations = generateCombinations(optionTypes, 0, {})
     const basePrice = form.getValues("base_price") || 0
+    const baseCostPrice = form.getValues("cost_price") || undefined
     const baseSku = form.getValues("sku") || ""
 
     // Create variants from combinations
@@ -1094,6 +1101,7 @@ export function ProductForm({
         name,
         sku: baseSku ? `${baseSku}-${skuSuffix}` : skuSuffix,
         price: basePrice,
+        cost_price: baseCostPrice,
         stock: 0,
         is_active: true,
         options
@@ -1581,43 +1589,56 @@ export function ProductForm({
                             </Field>
                           </div>
 
-                          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                             <Field>
-                              <FieldLabel className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Price ($)</FieldLabel>
-                              <Input 
-                                type="number" 
+                              <FieldLabel className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Price ($) *</FieldLabel>
+                              <Input
+                                type="number"
                                 step="0.01"
-                                value={editingVariant?.price || 0} 
+                                value={editingVariant?.price || 0}
                                 onChange={(e) => setEditingVariant(prev => prev ? { ...prev, price: parseFloat(e.target.value) || 0 } : null)}
                                 className="h-10"
                               />
                             </Field>
                             <Field>
                               <FieldLabel className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Sale Price ($)</FieldLabel>
-                              <Input 
-                                type="number" 
+                              <Input
+                                type="number"
                                 step="0.01"
                                 placeholder="Optional"
-                                value={editingVariant?.sale_price ?? ""} 
+                                value={editingVariant?.sale_price ?? ""}
                                 onChange={(e) => setEditingVariant(prev => prev ? { ...prev, sale_price: e.target.value ? parseFloat(e.target.value) : undefined } : null)}
                                 className="h-10"
                               />
                             </Field>
                             <Field>
+                              <FieldLabel className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Cost Price ($)</FieldLabel>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                placeholder="For profit calc"
+                                value={editingVariant?.cost_price ?? ""}
+                                onChange={(e) => setEditingVariant(prev => prev ? { ...prev, cost_price: e.target.value ? parseFloat(e.target.value) : undefined } : null)}
+                                className="h-10"
+                              />
+                            </Field>
+                          </div>
+                          <div className="grid grid-cols-2 lg:grid-cols-2 gap-4">
+                            <Field>
                               <FieldLabel className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Stock</FieldLabel>
-                              <Input 
-                                type="number" 
-                                value={editingVariant?.stock || 0} 
+                              <Input
+                                type="number"
+                                value={editingVariant?.stock || 0}
                                 onChange={(e) => setEditingVariant(prev => prev ? { ...prev, stock: parseInt(e.target.value) || 0 } : null)}
                                 className="h-10"
                               />
                             </Field>
                             <Field>
                               <FieldLabel className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Low Stock Alert</FieldLabel>
-                              <Input 
-                                type="number" 
+                              <Input
+                                type="number"
                                 placeholder="Optional"
-                                value={editingVariant?.low_stock_threshold ?? ""} 
+                                value={editingVariant?.low_stock_threshold ?? ""}
                                 onChange={(e) => setEditingVariant(prev => prev ? { ...prev, low_stock_threshold: e.target.value ? parseInt(e.target.value) : undefined } : null)}
                                 className="h-10"
                               />
@@ -2052,68 +2073,109 @@ export function ProductForm({
 
               {/* Pricing */}
               <FieldSet className="p-6 border border-border/50 rounded-2xl">
-                <FieldLegend variant="label" className="text-xs uppercase tracking-widest font-black text-muted-foreground/80 mb-4">Pricing</FieldLegend>
-                <FieldGroup>
-                  <Field data-invalid={form.formState.errors.base_price ? true : undefined}>
-                    <FieldLabel htmlFor="base_price" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Base Price *</FieldLabel>
-                    <FormControl>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
-                        <Input 
-                          id="base_price" 
-                          type="number" 
-                          step="0.01" 
-                          min="0"
-                          className="pl-7 h-10"
-                          {...form.register("base_price", { valueAsNumber: true })} 
-                        />
+                <div className="flex items-center justify-between mb-4">
+                  <FieldLegend variant="label" className="text-xs uppercase tracking-widest font-black text-muted-foreground/80 mb-0">Pricing</FieldLegend>
+                  {variants.length > 0 && (
+                    <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                      Managed by variants
+                    </Badge>
+                  )}
+                </div>
+                {variants.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-lg bg-muted/50 border border-dashed border-muted-foreground/20">
+                      <p className="text-sm text-muted-foreground">
+                        This product has variants. Pricing is managed individually for each variant.
+                      </p>
+                      <div className="mt-3 grid grid-cols-3 gap-4 text-center">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Price Range</p>
+                          <p className="text-sm font-medium mt-1">
+                            {variants.length > 0 ? (
+                              <>
+                                ${Math.min(...variants.map(v => v.sale_price ?? v.price)).toFixed(2)} - ${Math.max(...variants.map(v => v.price)).toFixed(2)}
+                              </>
+                            ) : "—"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">On Sale</p>
+                          <p className="text-sm font-medium mt-1">
+                            {variants.filter(v => v.sale_price).length} of {variants.length}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">With Cost</p>
+                          <p className="text-sm font-medium mt-1">
+                            {variants.filter(v => v.cost_price).length} of {variants.length}
+                          </p>
+                        </div>
                       </div>
-                    </FormControl>
-                    <FormMessage />
-                  </Field>
+                    </div>
+                  </div>
+                ) : (
+                  <FieldGroup>
+                    <Field data-invalid={form.formState.errors.base_price ? true : undefined}>
+                      <FieldLabel htmlFor="base_price" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Base Price *</FieldLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                          <Input 
+                            id="base_price" 
+                            type="number" 
+                            step="0.01" 
+                            min="0"
+                            className="pl-7 h-10"
+                            {...form.register("base_price", { valueAsNumber: true })} 
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </Field>
 
-                  <Field data-invalid={form.formState.errors.sale_price ? true : undefined}>
-                    <FieldLabel htmlFor="sale_price" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Sale Price</FieldLabel>
-                    <FormControl>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
-                        <Input 
-                          id="sale_price" 
-                          type="number" 
-                          step="0.01" 
-                          min="0"
-                          className="pl-7 h-10"
-                          placeholder="Optional"
-                          {...form.register("sale_price", { 
-                            valueAsNumber: true,
-                            setValueAs: (v) => v === "" ? undefined : parseFloat(v)
-                          })} 
-                        />
-                      </div>
-                    </FormControl>
-                  </Field>
+                    <Field data-invalid={form.formState.errors.sale_price ? true : undefined}>
+                      <FieldLabel htmlFor="sale_price" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Sale Price</FieldLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                          <Input 
+                            id="sale_price" 
+                            type="number" 
+                            step="0.01" 
+                            min="0"
+                            className="pl-7 h-10"
+                            placeholder="Optional"
+                            {...form.register("sale_price", { 
+                              valueAsNumber: true,
+                              setValueAs: (v) => v === "" ? undefined : parseFloat(v)
+                            })} 
+                          />
+                        </div>
+                      </FormControl>
+                    </Field>
 
-                  <Field data-invalid={form.formState.errors.cost_price ? true : undefined}>
-                    <FieldLabel htmlFor="cost_price" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Cost Price</FieldLabel>
-                    <FormControl>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
-                        <Input 
-                          id="cost_price" 
-                          type="number" 
-                          step="0.01" 
-                          min="0"
-                          className="pl-7 h-10"
-                          placeholder="For profit calculations"
-                          {...form.register("cost_price", { 
-                            valueAsNumber: true,
-                            setValueAs: (v) => v === "" ? undefined : parseFloat(v)
-                          })} 
-                        />
-                      </div>
-                    </FormControl>
-                  </Field>
-                </FieldGroup>
+                    <Field data-invalid={form.formState.errors.cost_price ? true : undefined}>
+                      <FieldLabel htmlFor="cost_price" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Cost Price</FieldLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                          <Input 
+                            id="cost_price" 
+                            type="number" 
+                            step="0.01" 
+                            min="0"
+                            className="pl-7 h-10"
+                            placeholder="For profit calculations"
+                            {...form.register("cost_price", { 
+                              valueAsNumber: true,
+                              setValueAs: (v) => v === "" ? undefined : parseFloat(v)
+                            })} 
+                          />
+                        </div>
+                      </FormControl>
+                    </Field>
+                  </FieldGroup>
+                )}
               </FieldSet>
 
               {/* Inventory */}
@@ -2301,7 +2363,7 @@ export function ProductForm({
                 <span className="text-xs text-muted-foreground mt-0.5 whitespace-nowrap">Review your modifications before applying.</span>
               </div>
               <div className="flex items-center gap-3">
-                <Button type="button" variant="outline" onClick={() => { form.reset(); setLocalImages(product?.images?.map(img => ({ id: img.id, url: img.url, alt_text: img.alt_text || undefined, display_order: img.display_order, is_primary: img.is_primary })) || []); setVariants(product?.variants?.map(v => ({ id: v.id, name: v.name, sku: v.sku || "", price: v.price || 0, sale_price: v.sale_price || undefined, stock: v.stock, low_stock_threshold: v.low_stock_threshold || undefined, is_active: v.is_active, options: (v.options as Record<string, string>) || {}, isExisting: true })) || []); toast.info("Changes discarded"); }} className="h-10 px-6 font-semibold border-2">Discard</Button>
+                <Button type="button" variant="outline" onClick={() => { form.reset(); setLocalImages(product?.images?.map(img => ({ id: img.id, url: img.url, alt_text: img.alt_text || undefined, display_order: img.display_order, is_primary: img.is_primary })) || []); setVariants(product?.variants?.map(v => ({ id: v.id, name: v.name, sku: v.sku || "", price: v.price || 0, sale_price: v.sale_price || undefined, cost_price: v.cost_price || undefined, stock: v.stock, low_stock_threshold: v.low_stock_threshold || undefined, is_active: v.is_active, options: (v.options as Record<string, string>) || {}, isExisting: true })) || []); toast.info("Changes discarded"); }} className="h-10 px-6 font-semibold border-2">Discard</Button>
                 <Button type="submit" className="h-10 px-8 font-bold shadow-lg shadow-primary/20" disabled={isLoading || !hasChanges}>{isLoading ? <><IconLoader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : <><IconCheck className="h-4 w-4 mr-2" />{isEditing ? "Update Product" : "Publish Product"}</>}</Button>
               </div>
             </div>

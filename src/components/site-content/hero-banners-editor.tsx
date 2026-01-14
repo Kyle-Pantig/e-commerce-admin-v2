@@ -7,6 +7,15 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -24,12 +33,22 @@ import {
   IconArrowDown,
   IconLink,
   IconX,
+  IconCopy,
 } from "@tabler/icons-react"
 import {
   siteContentApi,
   CONTENT_KEYS,
+  getBannerButtons,
+  previewTitleSizeClasses,
+  previewSubtitleSizeClasses,
+  previewButtonSizeClasses,
+  categoriesApi,
   type BannerItem,
+  type BannerButton,
   type HeroBannersContent,
+  type Category,
+  type TextSize,
+  type ButtonSize,
 } from "@/lib/api"
 import { BannerPreview } from "./banner-preview"
 import { uploadApi } from "@/lib/api/services/upload"
@@ -41,6 +60,18 @@ const DEFAULT_CONTENT: HeroBannersContent = {
   autoplay: true,
   autoplay_interval: 5000,
 }
+
+// Static store pages for link selection
+const STORE_PAGES = [
+  { value: "/", label: "Home" },
+  { value: "/shop", label: "Shop - All Products" },
+  { value: "/cart", label: "Shopping Cart" },
+  { value: "/checkout", label: "Checkout" },
+  { value: "/account", label: "My Account" },
+  { value: "/account/orders", label: "My Orders" },
+  { value: "/wishlist", label: "Wishlist" },
+  { value: "/search", label: "Search" },
+] as const
 
 // Type for pending file uploads
 interface PendingFile {
@@ -69,24 +100,84 @@ export function HeroBannersEditor() {
     queryFn: () => siteContentApi.get(CONTENT_KEYS.HERO_BANNERS).catch(() => null),
   })
 
+  // Fetch categories for link options
+  const { data: categoriesData } = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => categoriesApi.list(),
+  })
+
+  // Flatten categories for selection
+  const categoryOptions = useMemo(() => {
+    if (!categoriesData || categoriesData.length === 0) return []
+    const flatten = (cats: Category[], prefix = ""): { value: string; label: string }[] => {
+      return cats.flatMap(cat => {
+        if (!cat.is_active) return [] // Skip inactive categories
+        const label = prefix ? `${prefix} > ${cat.name}` : cat.name
+        const options = [{ value: `/shop/${cat.slug}`, label }]
+        if (cat.children && cat.children.length > 0) {
+          options.push(...flatten(cat.children, label))
+        }
+        return options
+      })
+    }
+    return flatten(categoriesData)
+  }, [categoriesData])
+
   const content: HeroBannersContent = (siteContent?.content as HeroBannersContent) || DEFAULT_CONTENT
   const [localContent, setLocalContent] = useState<HeroBannersContent | null>(null)
   const currentContent = localContent || content
 
-  // Check if there are actual changes by comparing values
+  // Normalize a banner for comparison (apply defaults for undefined values)
+  const normalizeBanner = useCallback((banner: BannerItem) => {
+    // Get buttons using the helper (handles legacy format)
+    const buttons = getBannerButtons(banner)
+    
+    return {
+      id: banner.id,
+      image_url: banner.image_url,
+      is_active: banner.is_active,
+      order: banner.order,
+      title: banner.title || "",
+      title_color: banner.title_color || "#ffffff",
+      title_size: banner.title_size || "lg",
+      subtitle: banner.subtitle || "",
+      subtitle_color: banner.subtitle_color || "#ffffff",
+      subtitle_size: banner.subtitle_size || "md",
+      content_align: banner.content_align || "center",
+      button_size: banner.button_size || "md",
+      // Normalize buttons array
+      buttons: buttons.map(btn => ({
+        text: btn.text || "",
+        link: btn.link || "",
+        variant: btn.variant || "primary",
+      })),
+    }
+  }, [])
+
+  // Normalize content for comparison
+  const normalizeContent = useCallback((c: HeroBannersContent): string => {
+    const normalized = {
+      autoplay: c.autoplay,
+      autoplay_interval: c.autoplay_interval,
+      banners: c.banners.map(normalizeBanner),
+    }
+    return JSON.stringify(normalized)
+  }, [normalizeBanner])
+
+  // Check if there are actual changes by comparing normalized values
   const hasChanges = useMemo(() => {
     // If there are pending files, there are changes
     if (pendingFiles.size > 0) return true
     
     // If there are images to delete, there are changes
     if (imagesToDelete.length > 0) return true
-    
+
     // If no local content, no changes
     if (localContent === null) return false
-    
-    // Compare the actual content values
-    return JSON.stringify(localContent) !== JSON.stringify(content)
-  }, [localContent, content, pendingFiles.size, imagesToDelete.length])
+
+    // Compare the normalized content values
+    return normalizeContent(localContent) !== normalizeContent(content)
+  }, [localContent, content, pendingFiles.size, imagesToDelete.length, normalizeContent])
 
   const updateContent = useCallback((updates: Partial<HeroBannersContent>) => {
     setLocalContent(prev => ({
@@ -101,8 +192,7 @@ export function HeroBannersEditor() {
       image_url: "",
       title: "",
       subtitle: "",
-      button_text: "",
-      button_link: "",
+      buttons: [],
       is_active: true,
       order: currentContent.banners.length,
     }
@@ -116,6 +206,93 @@ export function HeroBannersEditor() {
       ),
     })
   }, [currentContent.banners, updateContent])
+
+  // Add a button to a banner (max 2)
+  const addButton = useCallback((bannerId: string) => {
+    const banner = currentContent.banners.find(b => b.id === bannerId)
+    if (!banner) return
+    
+    const currentButtons = getBannerButtons(banner)
+    if (currentButtons.length >= 2) return
+    
+    const newButton: BannerButton = {
+      text: "",
+      link: "",
+      variant: currentButtons.length === 0 ? "primary" : "secondary"
+    }
+    
+    updateBanner(bannerId, { 
+      buttons: [...currentButtons, newButton],
+      // Clear legacy fields when using new format
+      button_text: undefined,
+      button_link: undefined
+    })
+  }, [currentContent.banners, updateBanner])
+
+  // Remove a button from a banner
+  const removeButton = useCallback((bannerId: string, buttonIndex: number) => {
+    const banner = currentContent.banners.find(b => b.id === bannerId)
+    if (!banner) return
+    
+    const currentButtons = getBannerButtons(banner)
+    const newButtons = currentButtons.filter((_, i) => i !== buttonIndex)
+    
+    updateBanner(bannerId, { 
+      buttons: newButtons,
+      button_text: undefined,
+      button_link: undefined
+    })
+  }, [currentContent.banners, updateBanner])
+
+  // Update a specific button
+  const updateButton = useCallback((bannerId: string, buttonIndex: number, updates: Partial<BannerButton>) => {
+    const banner = currentContent.banners.find(b => b.id === bannerId)
+    if (!banner) return
+    
+    const currentButtons = getBannerButtons(banner)
+    
+    // Apply updates to the target button
+    let newButtons = currentButtons.map((btn, i) => 
+      i === buttonIndex ? { ...btn, ...updates } : btn
+    )
+    
+    // When 2 buttons: ensure they're always different (one primary, one secondary)
+    if (updates.variant && currentButtons.length === 2) {
+      const otherVariant = updates.variant === "primary" ? "secondary" : "primary"
+      newButtons = newButtons.map((btn, i) => 
+        i !== buttonIndex ? { ...btn, variant: otherVariant as "primary" | "secondary" } : btn
+      )
+    }
+    
+    updateBanner(bannerId, { 
+      buttons: newButtons,
+      button_text: undefined,
+      button_link: undefined
+    })
+  }, [currentContent.banners, updateBanner])
+
+  // Copy buttons from another banner
+  const copyButtonsFrom = useCallback((targetBannerId: string, sourceBannerId: string) => {
+    const sourceBanner = currentContent.banners.find(b => b.id === sourceBannerId)
+    if (!sourceBanner) return
+    
+    const sourceButtons = getBannerButtons(sourceBanner)
+    if (sourceButtons.length === 0) return
+    
+    // Deep copy the buttons
+    const copiedButtons = sourceButtons.map(btn => ({ ...btn }))
+    
+    updateBanner(targetBannerId, { 
+      buttons: copiedButtons,
+      button_text: undefined,
+      button_link: undefined
+    })
+  }, [currentContent.banners, updateBanner])
+
+  // Get banners that have buttons (for copy from dropdown)
+  const bannersWithButtons = useMemo(() => {
+    return currentContent.banners.filter(b => getBannerButtons(b).length > 0)
+  }, [currentContent.banners])
 
   const removeBanner = useCallback((id: string) => {
     // Find the banner to get its image URL
@@ -521,19 +698,51 @@ export function HeroBannersEditor() {
                                 unoptimized={pendingFiles.has(banner.id)} // Skip optimization for blob URLs
                               />
                               {/* Overlay Preview */}
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent">
-                                <div className="absolute bottom-4 left-4 right-4 text-white">
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent">
+                                <div className={cn(
+                                  "absolute inset-0 flex flex-col justify-center px-4",
+                                  banner.content_align === "left" && "items-start text-left",
+                                  banner.content_align === "right" && "items-end text-right",
+                                  (!banner.content_align || banner.content_align === "center") && "items-center text-center"
+                                )}>
                                   {banner.title && (
-                                    <h3 className="text-lg font-bold drop-shadow-lg">{banner.title}</h3>
+                                    <h3 
+                                      className={cn(
+                                        "font-bold drop-shadow-lg",
+                                        previewTitleSizeClasses[banner.title_size || "lg"]
+                                      )}
+                                      style={{ color: banner.title_color || "#ffffff" }}
+                                    >
+                                      {banner.title}
+                                    </h3>
                                   )}
                                   {banner.subtitle && (
-                                    <p className="text-sm opacity-90 drop-shadow">{banner.subtitle}</p>
+                                    <p 
+                                      className={cn(
+                                        "drop-shadow mt-1",
+                                        previewSubtitleSizeClasses[banner.subtitle_size || "md"]
+                                      )}
+                                      style={{ color: banner.subtitle_color || "#ffffff", opacity: 0.9 }}
+                                    >
+                                      {banner.subtitle}
+                                    </p>
                                   )}
-                                  {banner.button_text && (
-                                    <div className="mt-2">
-                                      <span className="inline-block bg-white text-black text-xs font-medium px-3 py-1.5 rounded">
-                                        {banner.button_text}
-                                      </span>
+                                  {getBannerButtons(banner).length > 0 && (
+                                    <div className="mt-3 flex gap-2">
+                                      {getBannerButtons(banner).map((btn, btnIdx) => (
+                                        <span
+                                          key={btnIdx}
+                                          className={cn(
+                                            "inline-block font-medium rounded-md shadow",
+                                            previewButtonSizeClasses[banner.button_size || "md"],
+                                            btn.variant === "primary"
+                                              ? "bg-primary text-primary-foreground"
+                                              : "border border-input bg-background text-foreground"
+                                          )}
+                                        >
+                                          {btn.text || `Button ${btnIdx + 1}`}
+                                        </span>
+                                      ))}
                                     </div>
                                   )}
                                 </div>
@@ -645,47 +854,320 @@ export function HeroBannersEditor() {
                           <div className="space-y-3">
                             <div>
                               <Label className="text-xs text-muted-foreground mb-1.5 block">Headline</Label>
-                              <Input
-                                placeholder="Summer Collection 2026"
-                                value={banner.title || ""}
-                                onChange={(e) => updateBanner(banner.id, { title: e.target.value })}
-                                className="font-medium"
-                              />
+                              <div className="flex">
+                                <Input
+                                  placeholder="Summer Collection 2026"
+                                  value={banner.title || ""}
+                                  onChange={(e) => updateBanner(banner.id, { title: e.target.value })}
+                                  className="font-medium flex-1 rounded-r-none border-r-0"
+                                />
+                                <div className="w-10 h-9 border border-input rounded-none rounded-r-md overflow-hidden shrink-0">
+                                  <input
+                                    type="color"
+                                    value={banner.title_color || "#ffffff"}
+                                    onChange={(e) => updateBanner(banner.id, { title_color: e.target.value })}
+                                    className="w-12 h-12 -m-1 cursor-pointer border-0"
+                                    title="Headline color"
+                                  />
+                                </div>
+                              </div>
                             </div>
                             <div>
                               <Label className="text-xs text-muted-foreground mb-1.5 block">Subheadline</Label>
-                              <Input
-                                placeholder="Up to 50% off on selected items"
-                                value={banner.subtitle || ""}
-                                onChange={(e) => updateBanner(banner.id, { subtitle: e.target.value })}
-                              />
+                              <div className="flex">
+                                <Input
+                                  placeholder="Up to 50% off on selected items"
+                                  value={banner.subtitle || ""}
+                                  onChange={(e) => updateBanner(banner.id, { subtitle: e.target.value })}
+                                  className="flex-1 rounded-r-none border-r-0"
+                                />
+                                <div className="w-10 h-9 border border-input rounded-none rounded-r-md overflow-hidden shrink-0">
+                                  <input
+                                    type="color"
+                                    value={banner.subtitle_color || "#ffffff"}
+                                    onChange={(e) => updateBanner(banner.id, { subtitle_color: e.target.value })}
+                                    className="w-12 h-12 -m-1 cursor-pointer border-0"
+                                    title="Subheadline color"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Content Alignment */}
+                            <div className="flex items-center gap-3 pt-2">
+                              <Label className="text-xs text-muted-foreground">Alignment</Label>
+                              <div className="flex border border-input rounded-md overflow-hidden">
+                                <button
+                                  type="button"
+                                  onClick={() => updateBanner(banner.id, { content_align: "left" })}
+                                  className={cn(
+                                    "px-3 py-1.5 text-xs font-medium transition-colors",
+                                    banner.content_align === "left" 
+                                      ? "bg-primary text-primary-foreground" 
+                                      : "bg-background hover:bg-muted"
+                                  )}
+                                >
+                                  Left
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateBanner(banner.id, { content_align: "center" })}
+                                  className={cn(
+                                    "px-3 py-1.5 text-xs font-medium border-x border-input transition-colors",
+                                    (!banner.content_align || banner.content_align === "center")
+                                      ? "bg-primary text-primary-foreground" 
+                                      : "bg-background hover:bg-muted"
+                                  )}
+                                >
+                                  Center
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateBanner(banner.id, { content_align: "right" })}
+                                  className={cn(
+                                    "px-3 py-1.5 text-xs font-medium transition-colors",
+                                    banner.content_align === "right" 
+                                      ? "bg-primary text-primary-foreground" 
+                                      : "bg-background hover:bg-muted"
+                                  )}
+                                >
+                                  Right
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {/* Size Controls */}
+                            <div className="flex items-center gap-4 pt-2">
+                              <div className="flex items-center gap-2">
+                                <Label className="text-xs text-muted-foreground whitespace-nowrap">Headline</Label>
+                                <Select
+                                  value={banner.title_size || "lg"}
+                                  onValueChange={(value) => updateBanner(banner.id, { title_size: value as TextSize })}
+                                >
+                                  <SelectTrigger size="xs" className="w-16">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="sm">SM</SelectItem>
+                                    <SelectItem value="md">MD</SelectItem>
+                                    <SelectItem value="lg">LG</SelectItem>
+                                    <SelectItem value="xl">XL</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Label className="text-xs text-muted-foreground whitespace-nowrap">Subheadline</Label>
+                                <Select
+                                  value={banner.subtitle_size || "md"}
+                                  onValueChange={(value) => updateBanner(banner.id, { subtitle_size: value as TextSize })}
+                                >
+                                  <SelectTrigger size="xs" className="w-16">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="sm">SM</SelectItem>
+                                    <SelectItem value="md">MD</SelectItem>
+                                    <SelectItem value="lg">LG</SelectItem>
+                                    <SelectItem value="xl">XL</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Label className="text-xs text-muted-foreground whitespace-nowrap">Buttons</Label>
+                                <Select
+                                  value={banner.button_size || "md"}
+                                  onValueChange={(value) => updateBanner(banner.id, { button_size: value as ButtonSize })}
+                                >
+                                  <SelectTrigger size="xs" className="w-16">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="sm">SM</SelectItem>
+                                    <SelectItem value="md">MD</SelectItem>
+                                    <SelectItem value="lg">LG</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </div>
                           </div>
                         </div>
 
                         <div className="space-y-3">
-                          <Label className="text-sm font-medium">Call to Action</Label>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <Label className="text-xs text-muted-foreground mb-1.5 block">Button Label</Label>
-                              <Input
-                                placeholder="Shop Now"
-                                value={banner.button_text || ""}
-                                onChange={(e) => updateBanner(banner.id, { button_text: e.target.value })}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs text-muted-foreground mb-1.5 block flex items-center gap-1">
-                                <IconLink className="h-3 w-3" />
-                                Link URL
-                              </Label>
-                              <Input
-                                placeholder="/collections/summer"
-                                value={banner.button_link || ""}
-                                onChange={(e) => updateBanner(banner.id, { button_link: e.target.value })}
-                              />
+                          <div className="flex items-center justify-between">
+                            <Label className="text-sm font-medium">Call to Action Buttons</Label>
+                            <div className="flex items-center gap-2">
+                              {/* Copy from dropdown - only show if other banners have buttons */}
+                              {bannersWithButtons.filter(b => b.id !== banner.id).length > 0 && getBannerButtons(banner).length > 0 && (
+                                <Select
+                                  value=""
+                                  onValueChange={(value) => {
+                                    if (value) copyButtonsFrom(banner.id, value)
+                                  }}
+                                >
+                                  <SelectTrigger size="xs">
+                                    <IconCopy className="h-3 w-3" />
+                                    <SelectValue placeholder="Copy from..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {bannersWithButtons
+                                      .filter(b => b.id !== banner.id)
+                                      .map((b) => (
+                                        <SelectItem key={b.id} value={b.id}>
+                                          {b.title || `Banner ${currentContent.banners.findIndex(x => x.id === b.id) + 1}`}
+                                        </SelectItem>
+                                      ))
+                                    }
+                                  </SelectContent>
+                                </Select>
+                              )}
+                              {getBannerButtons(banner).length < 2 && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => addButton(banner.id)}
+                                  className="h-7 text-xs"
+                                >
+                                  <IconPlus className="h-3 w-3 mr-1" />
+                                  Add Button
+                                </Button>
+                              )}
                             </div>
                           </div>
+                          
+                          {getBannerButtons(banner).length === 0 ? (
+                            <div className="border-2 border-dashed rounded-lg p-4 text-center bg-muted/30">
+                              <p className="text-sm text-muted-foreground mb-3">No buttons added yet</p>
+                              <div className="flex items-center justify-center gap-2 flex-wrap">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => addButton(banner.id)}
+                                >
+                                  <IconPlus className="h-3 w-3 mr-1" />
+                                  Add Button
+                                </Button>
+                                {bannersWithButtons.filter(b => b.id !== banner.id).length > 0 && (
+                                  <>
+                                    <span className="text-xs text-muted-foreground">or</span>
+                                    <Select
+                                      value=""
+                                      onValueChange={(value) => {
+                                        if (value) copyButtonsFrom(banner.id, value)
+                                      }}
+                                    >
+                                      <SelectTrigger size="sm">
+                                        <SelectValue placeholder="Copy from..." />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {bannersWithButtons
+                                          .filter(b => b.id !== banner.id)
+                                          .map((b) => (
+                                            <SelectItem key={b.id} value={b.id}>
+                                              {b.title || `Banner ${currentContent.banners.findIndex(x => x.id === b.id) + 1}`}
+                                            </SelectItem>
+                                          ))
+                                        }
+                                      </SelectContent>
+                                    </Select>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {getBannerButtons(banner).map((btn, btnIndex) => (
+                                <div key={btnIndex} className="relative border rounded-lg p-3 bg-muted/20">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => updateButton(banner.id, btnIndex, { 
+                                          variant: btn.variant === "primary" ? "secondary" : "primary" 
+                                        })}
+                                        className="flex items-center gap-1 text-xs hover:opacity-80 transition-opacity"
+                                        title={getBannerButtons(banner).length === 2 
+                                          ? "Click to switch (other button will auto-adjust)" 
+                                          : "Click to switch variant"
+                                        }
+                                      >
+                                        <Badge 
+                                          variant={btn.variant === "primary" ? "default" : "secondary"} 
+                                          className="text-[10px] cursor-pointer"
+                                        >
+                                          {btn.variant === "primary" ? "Primary" : "Secondary"}
+                                        </Badge>
+                                        <span className="text-[10px] text-muted-foreground">
+                                          {getBannerButtons(banner).length === 2 ? "(swap)" : "(click to switch)"}
+                                        </span>
+                                      </button>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                                      onClick={() => removeButton(banner.id, btnIndex)}
+                                    >
+                                      <IconX className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <Label className="text-xs text-muted-foreground mb-1 block">Button Label</Label>
+                                      <Input
+                                        placeholder={btnIndex === 0 ? "Shop Now" : "Learn More"}
+                                        value={btn.text}
+                                        onChange={(e) => updateButton(banner.id, btnIndex, { text: e.target.value })}
+                                        className="h-8 text-sm"
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-muted-foreground mb-1 block flex items-center gap-1">
+                                        <IconLink className="h-3 w-3" />
+                                        Link To
+                                      </Label>
+                                      <Select
+                                        value={btn.link || ""}
+                                        onValueChange={(value) => updateButton(banner.id, btnIndex, { link: value })}
+                                      >
+                                        <SelectTrigger size="sm" className="w-full">
+                                          <SelectValue placeholder="Select a page..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectGroup>
+                                            <SelectLabel>Pages</SelectLabel>
+                                            {STORE_PAGES.map((page) => (
+                                              <SelectItem key={page.value} value={page.value}>
+                                                {page.label}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectGroup>
+                                          {categoryOptions.length > 0 && (
+                                            <SelectGroup>
+                                              <SelectLabel>Categories</SelectLabel>
+                                              {categoryOptions.map((cat) => (
+                                                <SelectItem key={cat.value} value={cat.value}>
+                                                  {cat.label}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectGroup>
+                                          )}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {getBannerButtons(banner).length === 1 && (
+                            <p className="text-xs text-muted-foreground">
+                              You can add one more button for a secondary action.
+                            </p>
+                          )}
                         </div>
 
                         {/* Quick Tips */}

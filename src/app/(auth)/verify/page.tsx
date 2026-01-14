@@ -124,93 +124,89 @@ export default function VerifyPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md">
-        <div className="flex flex-col gap-6">
-          <form onSubmit={handleVerify}>
-            <FieldGroup>
-              <div className="flex flex-col items-center gap-2 text-center">
-                <div className="flex size-8 items-center justify-center rounded-md">
-                  <GalleryVerticalEnd className="size-6" />
-                </div>
-                <h1 className="text-xl font-bold">Verify your email</h1>
-                <FieldDescription>
-                  We sent a 6-digit code to <strong>{email}</strong>
-                </FieldDescription>
-              </div>
+    <div className="flex flex-col gap-6">
+      <form onSubmit={handleVerify}>
+        <FieldGroup>
+          <div className="flex flex-col items-center gap-2 text-center">
+            <div className="flex size-8 items-center justify-center rounded-md">
+              <GalleryVerticalEnd className="size-6" />
+            </div>
+            <h1 className="text-xl font-bold">Verify your email</h1>
+            <FieldDescription>
+              We sent a 6-digit code to <strong>{email}</strong>
+            </FieldDescription>
+          </div>
 
-              {error && <FieldError>{error}</FieldError>}
+          {error && <FieldError>{error}</FieldError>}
 
-              <Field data-invalid={error ? true : undefined}>
-                <FieldLabel htmlFor="code">Verification Code</FieldLabel>
-                <Input
-                  ref={inputRef}
-                  id="code"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  value={code}
-                  onChange={handleCodeChange}
-                  placeholder="000000"
-                  className="text-center text-2xl tracking-[0.5em] font-mono"
-                  disabled={isLoading}
-                  maxLength={6}
-                />
-                <FieldDescription>
-                  This code will expire in 10 minutes
-                </FieldDescription>
-              </Field>
+          <Field data-invalid={error ? true : undefined}>
+            <FieldLabel htmlFor="code">Verification Code</FieldLabel>
+            <Input
+              ref={inputRef}
+              id="code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={handleCodeChange}
+              placeholder="000000"
+              className="text-center text-2xl tracking-[0.5em] font-mono"
+              disabled={isLoading}
+              maxLength={6}
+            />
+            <FieldDescription>
+              This code will expire in 10 minutes
+            </FieldDescription>
+          </Field>
 
-              <Field>
-                <Button
-                  type="submit"
-                  variant="default"
-                  className="w-full"
-                  disabled={isLoading || code.length !== 6}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Verifying...
-                    </>
-                  ) : (
-                    "Verify Email"
-                  )}
-                </Button>
-              </Field>
+          <Field>
+            <Button
+              type="submit"
+              variant="default"
+              className="w-full"
+              disabled={isLoading || code.length !== 6}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Verifying...
+                </>
+              ) : (
+                "Verify Email"
+              )}
+            </Button>
+          </Field>
 
-              <div className="text-center">
-                <FieldDescription>
-                  Didn't receive the code?{" "}
-                  <button
-                    type="button"
-                    onClick={handleResend}
-                    disabled={isResending || resendCooldown > 0}
-                    className="text-primary hover:underline disabled:opacity-50 disabled:no-underline"
-                  >
-                    {isResending ? (
-                      "Sending..."
-                    ) : resendCooldown > 0 ? (
-                      `Resend in ${resendCooldown}s`
-                    ) : (
-                      "Resend code"
-                    )}
-                  </button>
-                </FieldDescription>
-              </div>
+          <div className="text-center">
+            <FieldDescription>
+              Didn&apos;t receive the code?{" "}
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={isResending || resendCooldown > 0}
+                className="text-primary hover:underline disabled:opacity-50 disabled:no-underline"
+              >
+                {isResending ? (
+                  "Sending..."
+                ) : resendCooldown > 0 ? (
+                  `Resend in ${resendCooldown}s`
+                ) : (
+                  "Resend code"
+                )}
+              </button>
+            </FieldDescription>
+          </div>
 
-              <div className="text-center">
-                <FieldDescription>
-                  Wrong email?{" "}
-                  <a href="/signup" className="text-primary hover:underline">
-                    Go back to sign up
-                  </a>
-                </FieldDescription>
-              </div>
-            </FieldGroup>
-          </form>
-        </div>
-      </div>
+          <div className="text-center">
+            <FieldDescription>
+              Wrong email?{" "}
+              <a href="/signup" className="text-primary hover:underline">
+                Go back to sign up
+              </a>
+            </FieldDescription>
+          </div>
+        </FieldGroup>
+      </form>
     </div>
   )
 }

@@ -1,22 +1,11 @@
 "use client"
 
 import { useState, useMemo, useCallback } from "react"
-import { useRouter } from "next/navigation"
-import { useQuery } from "@tanstack/react-query"
+import { useParams } from "next/navigation"
 import Image from "next/image"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { Skeleton } from "@/components/ui/skeleton"
+import Link from "next/link"
+import { useQuery } from "@tanstack/react-query"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  IconArrowLeft,
   IconShoppingCart,
   IconHeart,
   IconShare,
@@ -25,90 +14,46 @@ import {
   IconRefresh,
   IconMinus,
   IconPlus,
-  IconStarFilled,
-  IconStar,
-  IconPackage,
   IconCheck,
   IconX,
 } from "@tabler/icons-react"
-import { cn, formatPrice, formatDiscountBadge } from "@/lib/utils"
+import { productsApi } from "@/lib/api"
+import type { Product } from "@/lib/api/types"
+import { cn, formatPrice } from "@/lib/utils"
+import { MaxWidthLayout, ProductCard, ProductCardSkeleton } from "@/components/store"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
 
-// Import shared API services and types
-import { productsApi } from "@/lib/api/services/products"
-import { discountsApi, type DiscountCode } from "@/lib/api/services/discounts"
-import { shippingApi, type ShippingCalculationResponse } from "@/lib/api/services/shipping"
-import type { Product, ProductImage, ProductVariant, ProductAttributeValue } from "@/lib/api/types"
-
-// Helper to get applicable discount for product/variant
-function getApplicableDiscount(
-  productId: string,
-  variantId: string | null,
-  autoApplyDiscounts: DiscountCode[]
-): DiscountCode | null {
-  for (const discount of autoApplyDiscounts) {
-    const hasProductRestriction = discount.applicable_products && discount.applicable_products.length > 0
-    const hasVariantRestriction = discount.applicable_variants && discount.applicable_variants.length > 0
-    
-    if (hasProductRestriction || hasVariantRestriction) {
-      // Check variant first if provided
-      if (variantId && hasVariantRestriction && discount.applicable_variants?.includes(variantId)) {
-        return discount
-      }
-      // Check product level
-      if (hasProductRestriction && discount.applicable_products?.includes(productId)) {
-        return discount
-      }
-      continue
-    }
-    
-    // No restrictions - applies to all
-    return discount
-  }
-  return null
-}
-
-// Calculate discounted price
-function calculateDiscountedPrice(price: number, discount: DiscountCode | null): number {
-  if (!discount) return price
+export default function ProductDetailPage() {
+  const params = useParams()
+  const slug = params.slug as string
   
-  if (discount.discount_type === "PERCENTAGE") {
-    const discountAmount = price * (discount.discount_value / 100)
-    const cappedDiscount = discount.maximum_discount 
-      ? Math.min(discountAmount, discount.maximum_discount)
-      : discountAmount
-    return price - cappedDiscount
-  } else {
-    return Math.max(0, price - discount.discount_value)
-  }
-}
-
-interface ProductViewProps {
-  slug: string
-  currentUserRole?: string
-}
-
-export function ProductView({ slug, currentUserRole }: ProductViewProps) {
-  const router = useRouter()
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [quantity, setQuantity] = useState(1)
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({})
 
-  const {
-    data: product,
-    isLoading,
-    error,
-  } = useQuery<Product, Error>({
-    queryKey: ["product", slug],
-    queryFn: () => productsApi.getBySlug(slug),
+  // Fetch product using public API
+  const { data: product, isLoading, error } = useQuery<Product>({
+    queryKey: ["product", "public", slug],
+    queryFn: () => productsApi.getPublicBySlug(slug),
     retry: 1,
+    staleTime: 5 * 60 * 1000,
   })
 
-  // Fetch auto-apply discounts
-  const { data: autoApplyDiscounts = [] } = useQuery<DiscountCode[]>({
-    queryKey: ["discounts", "auto-apply"],
-    queryFn: () => discountsApi.getAutoApplyDiscounts(),
+  // Fetch related products (same category, excluding current product)
+  const { data: relatedProductsData, isLoading: relatedLoading } = useQuery({
+    queryKey: ["products", "related", product?.category_id, product?.id],
+    queryFn: () => productsApi.listPublic({
+      per_page: 4,
+    }),
+    enabled: !!product?.id,
+    staleTime: 5 * 60 * 1000,
   })
+
+  // Filter out current product from related products
+  const relatedProducts = relatedProductsData?.items?.filter(p => p.id !== product?.id).slice(0, 4) ?? []
 
   // Extract unique option keys and values from variants
   const variantOptions = useMemo(() => {
@@ -140,19 +85,18 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
   const isOptionValueValid = useCallback((optionKey: string, optionValue: string, currentSelections: Record<string, string>) => {
     if (!product?.variants) return false
     
-    // Create a test selection with this option value
-    // Exclude the option being tested from current selections to avoid conflicts
-    const { [optionKey]: _, ...otherSelections } = currentSelections
     const testSelections = {
-      ...otherSelections,
+      ...currentSelections,
       [optionKey]: optionValue,
     }
     
-    // Check if there's any variant that matches all test selections
+    // Remove the option being tested to check compatibility
+    delete testSelections[optionKey]
+    testSelections[optionKey] = optionValue
+    
     return product.variants.some(variant => {
       if (!variant.options || !variant.is_active || variant.stock <= 0) return false
       
-      // Check if this variant matches all selected options
       return Object.entries(testSelections).every(([key, value]) => {
         return variant.options?.[key] === value
       })
@@ -167,14 +111,13 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
     return requiredOptionKeys.every(key => selectedOptions[key] !== undefined)
   }, [variantOptions, selectedOptions])
 
-  // Find matching variant based on selected options (only if ALL options are selected)
+  // Find matching variant based on selected options
   const matchingVariant = useMemo(() => {
     if (!product?.variants || !allOptionsSelected || Object.keys(selectedOptions).length === 0) return null
     
     return product.variants.find(variant => {
       if (!variant.options || !variant.is_active) return false
       
-      // Check exact match - all selected options must match AND variant must have same number of options
       const variantOptionKeys = Object.keys(variant.options || {})
       const selectedOptionKeys = Object.keys(selectedOptions)
       
@@ -186,34 +129,21 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
     }) || null
   }, [product?.variants, selectedOptions, allOptionsSelected])
 
-  // Get applicable discount for current product/variant
-  const applicableDiscount = useMemo(() => {
-    if (!product) return null
-    return getApplicableDiscount(
-      product.id, 
-      matchingVariant?.id || null, 
-      autoApplyDiscounts
-    )
-  }, [product, matchingVariant, autoApplyDiscounts])
-
-  // Get current price and stock (with discount applied)
-  const basePrice = useMemo(() => {
+  // Get current price
+  const currentPrice = useMemo(() => {
     if (matchingVariant) {
-      return matchingVariant.sale_price || matchingVariant.price || product?.sale_price || product?.base_price || 0
+      const variantSalePrice = matchingVariant.sale_price ?? 0
+      const variantPrice = matchingVariant.price ?? 0
+      return variantSalePrice > 0 ? variantSalePrice : variantPrice
     }
-    return product?.sale_price || product?.base_price || 0
+    return product?.sale_price ?? product?.base_price ?? 0
   }, [matchingVariant, product])
 
-  // Price after auto-apply discount
-  const currentPrice = useMemo(() => {
-    return calculateDiscountedPrice(basePrice, applicableDiscount)
-  }, [basePrice, applicableDiscount])
-
   const originalPrice = useMemo(() => {
-    if (matchingVariant?.price) {
+    if (matchingVariant?.price && matchingVariant.price > 0) {
       return matchingVariant.price
     }
-    return product?.base_price || 0
+    return product?.base_price ?? 0
   }, [matchingVariant, product])
 
   const currentStock = useMemo(() => {
@@ -221,55 +151,22 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
       return matchingVariant.stock
     }
     if (product?.has_variants && product.variants) {
-      return product.variants.reduce((sum, v) => sum + v.stock, 0)
+      return product.variants
+        .filter(v => v.is_active)
+        .reduce((sum, v) => sum + v.stock, 0)
     }
-    return product?.stock || 0
+    return product?.stock ?? 0
   }, [matchingVariant, product])
 
-  // Has sale price or auto-apply discount
-  const isOnSale = currentPrice < originalPrice || !!applicableDiscount
-  const hasAutoDiscount = !!applicableDiscount
-
-  // Fetch shipping info for this product
-  const { data: shippingInfo } = useQuery<ShippingCalculationResponse>({
-    queryKey: ["shipping", "calculate", product?.id, currentPrice, quantity],
-    queryFn: () => shippingApi.calculate({
-      order_subtotal: currentPrice * quantity,
-      product_ids: product?.id ? [product.id] : undefined,
-    }),
-    enabled: !!product?.id,
-  })
+  const isOnSale = currentPrice < originalPrice && originalPrice > 0
 
   const handleOptionChange = (optionKey: string, value: string) => {
     setSelectedOptions(prev => {
-      // If same value is clicked, unselect it
       if (prev[optionKey] === value) {
         const { [optionKey]: _, ...rest } = prev
         return rest
       }
-      
-      // Create new selections with this option
-      const newSelections = {
-        ...prev,
-        [optionKey]: value,
-      }
-      
-      // Remove any conflicting selections in other option groups
-      // (selections that don't have a valid variant combination)
-      const cleanedSelections: Record<string, string> = { [optionKey]: value }
-      
-      // Check each other selected option to see if it's still valid
-      // We need to check against all current selections (including the new one)
-      Object.entries(prev).forEach(([key, val]) => {
-        if (key !== optionKey) {
-          // Test if this option is still valid with all current selections (including new one)
-          if (isOptionValueValid(key, val, newSelections)) {
-            cleanedSelections[key] = val
-          }
-        }
-      })
-      
-      return cleanedSelections
+      return { ...prev, [optionKey]: value }
     })
   }
 
@@ -280,11 +177,7 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
   // Loading state
   if (isLoading) {
     return (
-      <div className="px-4 lg:px-6">
-        <Button variant="ghost" className="mb-6" disabled>
-          <IconArrowLeft className="mr-2 h-4 w-4" />
-          Back to Products
-        </Button>
+      <MaxWidthLayout className="py-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
           <div className="space-y-4">
             <Skeleton className="aspect-square w-full rounded-2xl" />
@@ -301,29 +194,25 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
             <Skeleton className="h-12 w-full" />
           </div>
         </div>
-      </div>
+      </MaxWidthLayout>
     )
   }
 
   // Error state
   if (error || !product) {
     return (
-      <div className="px-4 lg:px-6">
-        <Button variant="ghost" onClick={() => router.push("/products")} className="mb-6">
-          <IconArrowLeft className="mr-2 h-4 w-4" />
-          Back to Products
-        </Button>
+      <MaxWidthLayout className="py-8">
         <div className="text-center py-20">
-          <IconPackage className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
+          <IconShoppingCart className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
           <h2 className="text-2xl font-bold mb-2">Product Not Found</h2>
           <p className="text-muted-foreground mb-6">
-            {error?.message || "The product you're looking for doesn't exist."}
+            The product you&apos;re looking for doesn&apos;t exist or has been removed.
           </p>
-          <Button onClick={() => router.push("/products")}>
-            Browse Products
-          </Button>
+          <Link href="/shop/products">
+            <Button>Browse Products</Button>
+          </Link>
         </div>
-      </div>
+      </MaxWidthLayout>
     )
   }
 
@@ -338,14 +227,25 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
   const currentImage = images[selectedImageIndex]?.url || matchingVariant?.image_url
 
   return (
-    <div className="px-4 lg:px-6 pb-12">
-      {/* Back Button */}
-      <Button variant="ghost" onClick={() => router.push("/products")} className="mb-6">
-        <IconArrowLeft className="mr-2 h-4 w-4" />
-        Back to Products
-      </Button>
+    <MaxWidthLayout className="py-8">
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
+        <Link href="/" className="hover:text-foreground transition-colors">
+          Home
+        </Link>
+        <span>/</span>
+        <Link href="/shop" className="hover:text-foreground transition-colors">
+          Shop
+        </Link>
+        <span>/</span>
+        <Link href="/shop/products" className="hover:text-foreground transition-colors">
+          Products
+        </Link>
+        <span>/</span>
+        <span className="text-foreground font-medium line-clamp-1">{product.name}</span>
+      </nav>
 
-      {/* Two Column Layout: Image Gallery + Product Info */}
+      {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
         {/* Left: Image Gallery */}
         <div className="space-y-4">
@@ -361,25 +261,14 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
-                <IconPackage className="h-24 w-24 text-muted-foreground/30" />
+                <IconShoppingCart className="h-24 w-24 text-muted-foreground/30" />
               </div>
             )}
             
-            {/* Sale/Discount Badge */}
-            {isOnSale && (
-              <Badge className="absolute top-4 left-4 bg-red-500 text-white text-sm px-3 py-1">
-                {hasAutoDiscount && applicableDiscount
-                  ? formatDiscountBadge(applicableDiscount.discount_value, applicableDiscount.discount_type as "PERCENTAGE" | "FIXED_AMOUNT")
-                  : "SALE"
-                }
-              </Badge>
-            )}
-            
-            {/* Featured Badge */}
-            {product.is_featured && (
-              <Badge className="absolute top-4 right-4 bg-yellow-500 text-black text-sm px-3 py-1">
-                <IconStarFilled className="h-3 w-3 mr-1" />
-                Featured
+            {/* New Badge */}
+            {product.is_new && (
+              <Badge className="absolute top-4 right-4 bg-primary text-primary-foreground text-sm px-3 py-1">
+                New
               </Badge>
             )}
           </div>
@@ -412,34 +301,22 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
 
         {/* Right: Product Info */}
         <div className="space-y-6">
-          {/* Category & Status */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {product.category_name && (
-              <Badge variant="outline">{product.category_name}</Badge>
-            )}
-            {product.status !== "ACTIVE" && (
-              <Badge variant="secondary">{product.status}</Badge>
-            )}
-          </div>
+          {/* Category */}
+          {product.category_name && (
+            <Badge variant="outline">{product.category_name}</Badge>
+          )}
 
           {/* Product Name */}
           <h1 className="text-3xl lg:text-4xl font-bold tracking-tight">
             {product.name}
           </h1>
 
-          {/* SKU */}
-          {(product.sku || matchingVariant?.sku) && (
-            <p className="text-sm text-muted-foreground">
-              SKU: {matchingVariant?.sku || product.sku}
-            </p>
-          )}
-
           {/* Price */}
           <div className="flex items-baseline gap-3 flex-wrap">
             <span className="text-3xl font-bold text-primary">
               {formatPrice(currentPrice)}
             </span>
-            {isOnSale && currentPrice < originalPrice && (
+            {isOnSale && (
               <>
                 <span className="text-xl text-muted-foreground line-through">
                   {formatPrice(originalPrice)}
@@ -471,7 +348,6 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
                   <div className="flex flex-wrap gap-2">
                     {values.map(value => {
                       const isSelected = selectedOptions[optionKey] === value
-                      // Check if this option value is valid given current selections
                       const isValid = isOptionValueValid(optionKey, value, selectedOptions)
                       
                       return (
@@ -485,7 +361,6 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
                             "min-w-[60px]",
                             !isValid && "opacity-50 cursor-not-allowed"
                           )}
-                          title={!isValid ? "This combination is not available" : undefined}
                         >
                           {value}
                         </Button>
@@ -504,13 +379,9 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
                 <IconCheck className="h-5 w-5 text-green-500" />
                 <span className="text-green-600 font-medium">
                   In Stock
-                  {currentStock <= 10 ? (
+                  {currentStock <= 10 && (
                     <span className="text-orange-500 ml-2">
                       (Only {currentStock} left!)
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground ml-1">
-                      ({currentStock})
                     </span>
                   )}
                 </span>
@@ -578,28 +449,9 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
           {/* Trust Badges */}
           <div className="grid grid-cols-3 gap-4 pt-4">
             <div className="flex flex-col items-center text-center p-3 rounded-lg bg-muted/50">
-              <IconTruck className={cn("h-6 w-6 mb-2", shippingInfo?.is_free_shipping ? "text-green-500" : "text-primary")} />
-              {shippingInfo?.is_free_shipping ? (
-                <>
-                  <span className="text-xs font-medium text-green-600">Free Shipping</span>
-                  <span className="text-xs text-muted-foreground">On this order</span>
-                </>
-              ) : shippingInfo?.free_shipping_threshold ? (
-                <>
-                  <span className="text-xs font-medium">Free Shipping</span>
-                  <span className="text-xs text-muted-foreground">Orders ₱{shippingInfo.free_shipping_threshold.toLocaleString()}+</span>
-                </>
-              ) : shippingInfo ? (
-                <>
-                  <span className="text-xs font-medium">Shipping</span>
-                  <span className="text-xs text-muted-foreground">₱{shippingInfo.shipping_fee.toLocaleString()}</span>
-                </>
-              ) : (
-                <>
-                  <span className="text-xs font-medium">Shipping</span>
-                  <span className="text-xs text-muted-foreground">Calculated at checkout</span>
-                </>
-              )}
+              <IconTruck className="h-6 w-6 mb-2 text-primary" />
+              <span className="text-xs font-medium">Fast Delivery</span>
+              <span className="text-xs text-muted-foreground">2-3 Days</span>
             </div>
             <div className="flex flex-col items-center text-center p-3 rounded-lg bg-muted/50">
               <IconShieldCheck className="h-6 w-6 mb-2 text-primary" />
@@ -615,7 +467,7 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
         </div>
       </div>
 
-      {/* Single Column: Description, Specs, Variants */}
+      {/* Description & Details Section */}
       <div className="mt-12 space-y-8">
         <Separator />
         
@@ -635,16 +487,19 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
         {product.attribute_values && product.attribute_values.filter(attr => attr.value && attr.value.trim() !== "").length > 0 && (
           <div className="space-y-4">
             <h2 className="text-2xl font-bold">Specifications</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
               {product.attribute_values
                 .filter(attr => attr.value && attr.value.trim() !== "")
-                .map(attr => (
+                .map((attr, index, arr) => (
                 <div
                   key={attr.id}
-                  className="flex justify-between items-center p-4 rounded-lg bg-muted/50 border"
+                  className={cn(
+                    "flex justify-between items-center py-3",
+                    index !== arr.length - 1 && "border-b"
+                  )}
                 >
-                  <span className="font-medium">{attr.attribute_name}</span>
-                  <span className="text-muted-foreground">
+                  <span className="text-muted-foreground">{attr.attribute_name}</span>
+                  <span className="font-medium">
                     {attr.attribute_type === "BOOLEAN"
                       ? attr.value === "true" ? "Yes" : "No"
                       : attr.value}
@@ -655,87 +510,33 @@ export function ProductView({ slug, currentUserRole }: ProductViewProps) {
           </div>
         )}
 
-        {/* Physical Properties */}
-        {(product.weight || product.length || product.width || product.height) && (
-          <div className="space-y-4">
-            <h2 className="text-2xl font-bold">Physical Properties</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {product.weight && (
-                <div className="p-4 rounded-lg bg-muted/50 border text-center">
-                  <p className="text-2xl font-bold">{product.weight}</p>
-                  <p className="text-sm text-muted-foreground">Weight (kg)</p>
-                </div>
-              )}
-              {product.length && (
-                <div className="p-4 rounded-lg bg-muted/50 border text-center">
-                  <p className="text-2xl font-bold">{product.length}</p>
-                  <p className="text-sm text-muted-foreground">Length (cm)</p>
-                </div>
-              )}
-              {product.width && (
-                <div className="p-4 rounded-lg bg-muted/50 border text-center">
-                  <p className="text-2xl font-bold">{product.width}</p>
-                  <p className="text-sm text-muted-foreground">Width (cm)</p>
-                </div>
-              )}
-              {product.height && (
-                <div className="p-4 rounded-lg bg-muted/50 border text-center">
-                  <p className="text-2xl font-bold">{product.height}</p>
-                  <p className="text-sm text-muted-foreground">Height (cm)</p>
-                </div>
-              )}
+        {/* Related Products */}
+        {(relatedProducts.length > 0 || relatedLoading) && (
+          <div className="space-y-6">
+            <Separator />
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">You May Also Like</h2>
+              <Link 
+                href="/shop/products" 
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                View All →
+              </Link>
             </div>
-          </div>
-        )}
-
-        {/* Available Variants Table */}
-        {product.has_variants && product.variants && product.variants.length > 0 && (
-          <div className="space-y-4">
-            <h2 className="text-2xl font-bold">Available Options</h2>
-            <div className="rounded-lg border overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="text-left p-4 font-medium">Variant</th>
-                    <th className="text-left p-4 font-medium">Options</th>
-                    <th className="text-right p-4 font-medium">Price</th>
-                    <th className="text-center p-4 font-medium">Availability</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {product.variants.filter(v => v.is_active).map(variant => (
-                    <tr key={variant.id} className="hover:bg-muted/30">
-                      <td className="p-4 font-medium">{variant.name}</td>
-                      <td className="p-4">
-                        <div className="flex flex-wrap gap-1">
-                          {variant.options && Object.entries(variant.options).map(([k, v]) => (
-                            <Badge key={k} variant="outline" className="text-xs">
-                              {k}: {v}
-                            </Badge>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="p-4 text-right">
-                        {formatPrice(variant.sale_price || variant.price || product.base_price)}
-                      </td>
-                      <td className="p-4 text-center">
-                        {variant.stock > 0 ? (
-                          <Badge variant="secondary" className="bg-green-100 text-green-700">
-                            {variant.stock} in stock
-                          </Badge>
-                        ) : (
-                          <Badge variant="destructive">Out of Stock</Badge>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {relatedLoading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <ProductCardSkeleton key={i} />
+                ))
+              ) : (
+                relatedProducts.map((relatedProduct) => (
+                  <ProductCard key={relatedProduct.id} product={relatedProduct} />
+                ))
+              )}
             </div>
           </div>
         )}
       </div>
-    </div>
+    </MaxWidthLayout>
   )
 }
-

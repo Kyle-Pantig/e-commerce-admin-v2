@@ -76,7 +76,10 @@ export default function NewProductPage() {
     mutationFn: (data: ProductCreate) => productsApi.create(data),
     onSuccess: () => {
       toast.success("Product created successfully")
+      // Invalidate admin queries
       queryClient.invalidateQueries({ queryKey: ["products"] })
+      // Invalidate public/store queries
+      queryClient.invalidateQueries({ queryKey: ["products", "public"] })
       router.push("/products")
     },
     onError: (error: Error) => {
