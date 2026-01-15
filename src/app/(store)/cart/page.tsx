@@ -40,6 +40,7 @@ export default function CartPage() {
     clearCart,
     updateLocalQuantity,
     removeLocalItem,
+    clearLocalCart,
   } = useCart()
 
   const [discountCode, setDiscountCode] = useState("")
@@ -474,78 +475,197 @@ export default function CartPage() {
     )
   }
 
-  // Guest cart message
+  // Calculate guest cart totals
+  const guestSubtotal = localCartItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  const guestTotalQuantity = localCartItems.reduce((sum, item) => sum + item.quantity, 0)
+
+  // Guest cart - same layout as authenticated cart
   if (showGuestCart) {
     return (
       <MaxWidthLayout className="py-8">
-        <h1 className="text-2xl font-bold mb-8">Shopping Cart</h1>
-        
-        <div className="bg-muted/50 rounded-lg p-6 mb-6">
-          <p className="text-muted-foreground mb-4">
-            You have {localCartItems.length} item(s) in your cart. 
-            <Link href="/login" className="text-primary font-medium ml-1 hover:underline">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-2xl font-bold">Shopping Cart</h1>
+          {localCartItems.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearLocalCart}
+            >
+              <IconTrash className="mr-2 h-4 w-4" />
+              Clear Cart
+            </Button>
+          )}
+        </div>
+
+        {/* Login prompt banner */}
+        <div className="bg-muted/50 rounded-lg p-4 mb-6">
+          <p className="text-sm text-muted-foreground">
+            <Link href="/login" className="text-primary font-medium hover:underline">
               Login
-            </Link> to save your cart and checkout.
+            </Link>{" "}
+            to save your cart and checkout.
           </p>
         </div>
 
-        <div className="space-y-4">
-          {localCartItems.map((item, index) => (
-            <div
-              key={`${item.product_id}-${item.variant_id || 'no-variant'}-${index}`}
-              className="flex gap-4 p-4 border rounded-lg"
-            >
-              <div className="w-24 h-24 rounded-md bg-muted flex items-center justify-center">
-                <IconShoppingCart className="w-8 h-8 text-muted-foreground/30" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium text-sm text-muted-foreground">
-                  Product ID: {item.product_id.slice(0, 8)}...
-                </p>
-                {item.variant_id && (
-                  <p className="text-xs text-muted-foreground">
-                    Variant: {item.variant_id.slice(0, 8)}...
-                  </p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Cart Items */}
+          <div className="lg:col-span-2 space-y-4">
+            {localCartItems.map((item, index) => (
+              <div
+                key={`${item.product_id}-${item.variant_id || 'no-variant'}-${index}`}
+                className="relative flex gap-4 p-4 border rounded-lg"
+              >
+                {/* Delete Button - Top Right */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute top-2 right-2 h-8 w-8 text-muted-foreground hover:text-destructive"
+                  onClick={() => removeLocalItem(item.product_id, item.variant_id)}
+                >
+                  <IconTrash className="h-4 w-4" />
+                </Button>
+
+                {/* Product Image */}
+                {item.product_slug ? (
+                  <Link href={`/shop/products/${item.product_slug}`}>
+                    <div className="relative w-24 h-24 rounded-md overflow-hidden bg-muted flex-shrink-0">
+                      {item.product_image ? (
+                        <img
+                          src={item.product_image}
+                          alt={item.product_name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <IconShoppingCart className="w-8 h-8 text-muted-foreground/30" />
+                        </div>
+                      )}
+                    </div>
+                  </Link>
+                ) : (
+                  <div className="relative w-24 h-24 rounded-md overflow-hidden bg-muted flex-shrink-0">
+                    {item.product_image ? (
+                      <img
+                        src={item.product_image}
+                        alt={item.product_name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <IconShoppingCart className="w-8 h-8 text-muted-foreground/30" />
+                      </div>
+                    )}
+                  </div>
                 )}
-                <div className="flex items-center gap-2 mt-2">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => updateLocalQuantity(item.product_id, item.variant_id, item.quantity - 1)}
-                  >
-                    <IconMinus className="h-3 w-3" />
-                  </Button>
-                  <span className="w-8 text-center">{item.quantity}</span>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => updateLocalQuantity(item.product_id, item.variant_id, item.quantity + 1)}
-                  >
-                    <IconPlus className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive ml-auto"
-                    onClick={() => removeLocalItem(item.product_id, item.variant_id)}
-                  >
-                    <IconTrash className="h-4 w-4" />
-                  </Button>
+
+                {/* Product Details */}
+                <div className="flex-1 min-w-0 flex flex-col">
+                  {/* Product Name - Show loading state while fetching */}
+                  {item.product_name === "Unknown Product" ? (
+                    <div className="space-y-1 pr-8">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="h-3 w-1/2" />
+                    </div>
+                  ) : item.product_slug ? (
+                    <Link href={`/shop/products/${item.product_slug}`}>
+                      <h3 className="font-medium hover:underline line-clamp-1 pr-8">
+                        {item.product_name}
+                      </h3>
+                    </Link>
+                  ) : (
+                    <h3 className="font-medium line-clamp-1 pr-8 text-muted-foreground">
+                      {item.product_name}
+                    </h3>
+                  )}
+                  
+                  {/* Variant Name / Options */}
+                  {item.variant_name && item.product_name !== "Unknown Product" && (
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      {item.options ? Object.values(item.options).join(" / ") : item.variant_name}
+                    </p>
+                  )}
+
+                  {/* Price per item */}
+                  {item.product_name === "Unknown Product" ? (
+                    <Skeleton className="h-4 w-20 mt-1" />
+                  ) : (
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-sm text-muted-foreground">
+                        {item.price > 0 ? `${formatPrice(item.price)} each` : "Price unavailable"}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Quantity Controls */}
+                  <div className="flex items-center gap-2 mt-auto pt-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => updateLocalQuantity(item.product_id, item.variant_id, item.quantity - 1)}
+                      disabled={item.quantity <= 1}
+                    >
+                      <IconMinus className="h-3 w-3" />
+                    </Button>
+                    <span className="w-8 text-center font-medium">{item.quantity}</span>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => updateLocalQuantity(item.product_id, item.variant_id, item.quantity + 1)}
+                    >
+                      <IconPlus className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Item Subtotal - Bottom Right */}
+                {item.product_name !== "Unknown Product" && item.price > 0 && (
+                  <div className="absolute bottom-4 right-4 text-right">
+                    <p className="font-semibold">{formatPrice(item.price * item.quantity)}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Order Summary */}
+          <div className="lg:col-span-1">
+            <div className="border rounded-lg p-6 sticky top-24 space-y-4">
+              <h2 className="text-lg font-semibold mb-4">Order Summary</h2>
+
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Items ({guestTotalQuantity})</span>
+                  <span>{formatPrice(guestSubtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Shipping</span>
+                  <span className="text-muted-foreground">Calculated at checkout</span>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
 
-        <div className="mt-8 flex justify-center">
-          <Link href="/login">
-            <Button size="lg">
-              Login to Checkout
-              <IconArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-          </Link>
+              <Separator />
+
+              <div className="flex justify-between text-lg font-semibold">
+                <span>Subtotal</span>
+                <span>{formatPrice(guestSubtotal)}</span>
+              </div>
+
+              <Link href="/login" className="block">
+                <Button className="w-full mt-6" size="lg">
+                  Login to Checkout
+                  <IconArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </Link>
+
+              <Link href="/shop">
+                <Button variant="outline" className="w-full mt-3">
+                  Continue Shopping
+                </Button>
+              </Link>
+            </div>
+          </div>
         </div>
       </MaxWidthLayout>
     )

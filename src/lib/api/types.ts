@@ -758,6 +758,12 @@ export interface AddToCartRequest {
   variant_id?: string | null
   quantity?: number
   options?: Record<string, unknown> | null
+  // Product details for guest cart display
+  product_name?: string
+  product_slug?: string
+  product_image?: string | null
+  price?: number
+  variant_name?: string | null
 }
 
 export interface CartCountResponse {
@@ -782,5 +788,11 @@ export interface LocalCartItem {
   quantity: number
   options: Record<string, unknown> | null
   added_at: string
+  // Product details for display
+  product_name: string
+  product_slug: string
+  product_image: string | null
+  price: number
+  variant_name: string | null
 }
 

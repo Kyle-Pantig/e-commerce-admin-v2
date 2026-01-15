@@ -419,11 +419,18 @@ export default function ProductDetailPage() {
     setTimeout(() => setJustAddedToCart(false), 2000)
 
     // Fire and forget - errors handled by mutation's onError
+    // Include product details for guest cart display
     addToCart({
       product_id: product.id,
       variant_id: matchingVariant?.id || null,
       quantity: addedQuantity,
       options: Object.keys(selectedOptions).length > 0 ? selectedOptions : null,
+      // Product details for guest cart
+      product_name: product.name,
+      product_slug: product.slug,
+      product_image: product.images?.[0]?.url || null,
+      price: currentPrice,
+      variant_name: matchingVariant?.name || null,
     }).catch(() => {
       setJustAddedToCart(false)
       toast.error("Failed to add to cart")

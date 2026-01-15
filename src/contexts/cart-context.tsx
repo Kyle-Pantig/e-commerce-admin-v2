@@ -1,8 +1,8 @@
 "use client"
 
-import { createContext, useCallback, ReactNode, useMemo, useEffect, useState } from "react"
+import { createContext, useCallback, ReactNode, useMemo, useEffect, useState, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { cartApi } from "@/lib/api"
+import { cartApi, productsApi } from "@/lib/api"
 import { useAuth } from "./auth-context"
 import type { Cart, CartItem, LocalCartItem, AddToCartRequest } from "@/lib/api/types"
 
@@ -16,7 +16,23 @@ function getLocalCart(): LocalCartItem[] {
   if (typeof window === "undefined") return []
   try {
     const stored = localStorage.getItem(CART_STORAGE_KEY)
-    return stored ? JSON.parse(stored) : []
+    if (!stored) return []
+    
+    // Parse and migrate old cart items that may be missing new fields
+    const items = JSON.parse(stored) as LocalCartItem[]
+    return items.map(item => ({
+      product_id: item.product_id,
+      variant_id: item.variant_id,
+      quantity: item.quantity,
+      options: item.options || null,
+      added_at: item.added_at || new Date().toISOString(),
+      // Add default values for new fields if missing
+      product_name: item.product_name || "Unknown Product",
+      product_slug: item.product_slug || "",
+      product_image: item.product_image || null,
+      price: item.price || 0,
+      variant_name: item.variant_name || null,
+    }))
   } catch {
     return []
   }
@@ -76,6 +92,7 @@ export interface CartContextValue {
   addToLocalCart: (request: AddToCartRequest) => void
   updateLocalQuantity: (productId: string, variantId: string | null, quantity: number) => void
   removeLocalItem: (productId: string, variantId: string | null) => void
+  clearLocalCart: () => void
 }
 
 export const CartContext = createContext<CartContextValue | null>(null)
@@ -96,6 +113,79 @@ export function CartProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setLocalCartItems(getLocalCart())
   }, [])
+
+  // Track which product IDs we've already fetched to prevent duplicate requests
+  const fetchedProductIds = useRef<Set<string>>(new Set())
+
+  // Fetch product details for cart items that are missing data (migration for old cart items)
+  useEffect(() => {
+    const fetchMissingProductDetails = async () => {
+      // Find items that need product details and haven't been fetched yet
+      const itemsNeedingDetails = localCartItems.filter(
+        item => (item.product_name === "Unknown Product" || item.price === 0) &&
+                !fetchedProductIds.current.has(item.product_id)
+      )
+
+      if (itemsNeedingDetails.length === 0) return
+
+      // Mark these products as being fetched
+      itemsNeedingDetails.forEach(item => {
+        fetchedProductIds.current.add(item.product_id)
+      })
+
+      // Fetch product details for each item
+      const updatedItems = await Promise.all(
+        localCartItems.map(async (item) => {
+          if (item.product_name !== "Unknown Product" && item.price > 0) {
+            return item // Already has details
+          }
+
+          try {
+            // Fetch product by ID
+            const product = await productsApi.getById(item.product_id)
+            
+            // Find the variant if variant_id is set
+            const variant = item.variant_id 
+              ? product.variants?.find(v => v.id === item.variant_id)
+              : null
+
+            // Calculate price
+            let price = product.sale_price || product.base_price
+            if (variant) {
+              price = variant.sale_price || variant.price || price
+            }
+
+            return {
+              ...item,
+              product_name: product.name,
+              product_slug: product.slug,
+              product_image: product.images?.[0]?.url || null,
+              price: price,
+              variant_name: variant?.name || null,
+            }
+          } catch {
+            // Product might have been deleted, keep the item as is
+            return item
+          }
+        })
+      )
+
+      // Check if any items were actually updated
+      const hasUpdates = updatedItems.some((item, i) => 
+        item.product_name !== localCartItems[i].product_name ||
+        item.price !== localCartItems[i].price
+      )
+
+      if (hasUpdates) {
+        setLocalCartItems(updatedItems)
+        setLocalCart(updatedItems)
+      }
+    }
+
+    if (localCartItems.length > 0) {
+      fetchMissingProductDetails()
+    }
+  }, [localCartItems]) // Run when cart items change
 
   // React to auth changes
   useEffect(() => {
@@ -455,13 +545,19 @@ export function CartProvider({ children }: { children: ReactNode }) {
     if (isAuthenticated) {
       await addMutation.mutateAsync(request)
     } else {
-      // Add to local cart
+      // Add to local cart with product details
       const newItem: LocalCartItem = {
         product_id: request.product_id,
         variant_id: request.variant_id || null,
         quantity: request.quantity || 1,
         options: request.options || null,
         added_at: new Date().toISOString(),
+        // Include product details for display
+        product_name: request.product_name || "Unknown Product",
+        product_slug: request.product_slug || "",
+        product_image: request.product_image || null,
+        price: request.price || 0,
+        variant_name: request.variant_name || null,
       }
       
       setLocalCartItems(prev => {
@@ -527,14 +623,20 @@ export function CartProvider({ children }: { children: ReactNode }) {
       quantity: request.quantity || 1,
       options: request.options || null,
       added_at: new Date().toISOString(),
+      // Include product details for display
+      product_name: request.product_name || "Unknown Product",
+      product_slug: request.product_slug || "",
+      product_image: request.product_image || null,
+      price: request.price || 0,
+      variant_name: request.variant_name || null,
     }
-    
+
     setLocalCartItems(prev => {
       const existingIndex = prev.findIndex(
-        item => item.product_id === request.product_id && 
+        item => item.product_id === request.product_id &&
                 item.variant_id === (request.variant_id || null)
       )
-      
+
       let updated: LocalCartItem[]
       if (existingIndex >= 0) {
         updated = [...prev]
@@ -545,7 +647,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       } else {
         updated = [...prev, newItem]
       }
-      
+
       setLocalCart(updated)
       return updated
     })
@@ -578,6 +680,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
       setLocalCart(updated)
       return updated
     })
+  }, [])
+
+  const clearLocalCartItems = useCallback(() => {
+    setLocalCartItems([])
+    clearLocalCart()
   }, [])
 
   // =============================================================================
@@ -624,6 +731,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     addToLocalCart,
     updateLocalQuantity,
     removeLocalItem,
+    clearLocalCart: clearLocalCartItems,
   }), [
     cart,
     cartItems,
@@ -643,6 +751,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     addToLocalCart,
     updateLocalQuantity,
     removeLocalItem,
+    clearLocalCartItems,
   ])
 
   return (
