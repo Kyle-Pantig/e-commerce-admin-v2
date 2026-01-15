@@ -37,6 +37,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
+import { useShopFilters } from "@/stores"
 
 const SORT_OPTIONS = [
   { value: "newest-desc", label: "Newest First" },
@@ -55,25 +56,55 @@ const PRICE_RANGES = [
 ]
 
 export default function ShopPage() {
-  const [page, setPage] = useState(1)
-  const [sortBy, setSortBy] = useState("newest-desc")
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
-  const [showOnSale, setShowOnSale] = useState(false)
-  const [showInStock, setShowInStock] = useState(false)
+  // Zustand store for filters (persisted)
+  const {
+    sortBy,
+    selectedCategories,
+    priceRange,
+    showOnSale,
+    showInStock,
+    page,
+    categoriesOpen,
+    priceOpen,
+    availabilityOpen,
+    setSortBy,
+    toggleCategory,
+    setPriceRange,
+    setShowOnSale,
+    setShowInStock,
+    setPage,
+    setCategoriesOpen,
+    setPriceOpen,
+    setAvailabilityOpen,
+    clearAllFilters,
+    hasActiveFilters,
+    getActiveFilterCount,
+  } = useShopFilters()
+
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   
-  // Price range - local state for smooth slider, debounced for API
-  const [sliderValue, setSliderValue] = useState<[number, number]>([0, 1000])
-  const [debouncedPriceRange, setDebouncedPriceRange] = useState<[number, number]>([0, 1000])
+  // Local slider state for smooth sliding, synced with store
+  const [sliderValue, setSliderValue] = useState<[number, number]>(priceRange)
+  const [debouncedPriceRange, setDebouncedPriceRange] = useState<[number, number]>(priceRange)
   const debounceRef = useRef<NodeJS.Timeout | null>(null)
   
-  // Debounce price range changes
+  // Sync slider with store when store changes (e.g., on clear filters)
+  useEffect(() => {
+    setSliderValue(priceRange)
+    setDebouncedPriceRange(priceRange)
+  }, [priceRange])
+  
+  // Debounce slider changes and update store
   useEffect(() => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current)
     }
     debounceRef.current = setTimeout(() => {
       setDebouncedPriceRange(sliderValue)
+      // Only update store if different from current store value
+      if (sliderValue[0] !== priceRange[0] || sliderValue[1] !== priceRange[1]) {
+        setPriceRange(sliderValue)
+      }
     }, 500)
     
     return () => {
@@ -81,12 +112,7 @@ export default function ShopPage() {
         clearTimeout(debounceRef.current)
       }
     }
-  }, [sliderValue])
-  
-  // Collapsible states
-  const [categoriesOpen, setCategoriesOpen] = useState(true)
-  const [priceOpen, setPriceOpen] = useState(true)
-  const [availabilityOpen, setAvailabilityOpen] = useState(true)
+  }, [sliderValue, priceRange, setPriceRange])
   
   const perPage = 12
 
@@ -185,26 +211,10 @@ export default function ShopPage() {
   const products = filteredProducts
   const totalPages = productsData?.total_pages ?? 1
   const totalProducts = filteredProducts.length
-
-  const handleCategoryToggle = (slug: string) => {
-    setSelectedCategories(prev => 
-      prev.includes(slug) 
-        ? prev.filter(s => s !== slug)
-        : [...prev, slug]
-    )
-    setPage(1)
-  }
-
-  const clearAllFilters = () => {
-    setSelectedCategories([])
-    setSliderValue([0, 1000])
-    setDebouncedPriceRange([0, 1000])
-    setShowOnSale(false)
-    setShowInStock(false)
-    setPage(1)
-  }
-
-  const hasActiveFilters = selectedCategories.length > 0 || showOnSale || showInStock || sliderValue[0] > 0 || sliderValue[1] < 1000
+  
+  // Get active filters state
+  const isFiltersActive = hasActiveFilters()
+  const activeFilterCount = getActiveFilterCount()
 
   // Memoized slider change handler for smooth sliding
   const handleSliderChange = useCallback((value: number[]) => {
@@ -215,7 +225,7 @@ export default function ShopPage() {
   const filterContent = (
     <div className="space-y-6">
       {/* Clear Filters */}
-      {hasActiveFilters && (
+      {isFiltersActive && (
         <Button 
           variant="ghost" 
           size="sm" 
@@ -247,7 +257,7 @@ export default function ShopPage() {
               <Checkbox
                 id={`cat-${cat.id}`}
                 checked={selectedCategories.includes(cat.slug)}
-                onCheckedChange={() => handleCategoryToggle(cat.slug)}
+                onCheckedChange={() => toggleCategory(cat.slug)}
               />
               <Label 
                 htmlFor={`cat-${cat.id}`}
@@ -380,9 +390,9 @@ export default function ShopPage() {
                   <Button variant="outline" size="sm" className="lg:hidden">
                     <IconFilter className="w-4 h-4 mr-2" />
                     Filters
-                    {hasActiveFilters && (
+                    {isFiltersActive && (
                       <span className="ml-2 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
-                        {selectedCategories.length + (showOnSale ? 1 : 0) + (showInStock ? 1 : 0)}
+                        {activeFilterCount}
                       </span>
                     )}
                   </Button>
@@ -414,7 +424,7 @@ export default function ShopPage() {
           </div>
 
           {/* Active Filters */}
-          {hasActiveFilters && (
+          {isFiltersActive && (
             <div className="flex flex-wrap gap-2 mb-4">
               {selectedCategories.map((slug) => {
                 const cat = flatCategories.find(c => c.slug === slug)
@@ -423,7 +433,7 @@ export default function ShopPage() {
                     key={slug}
                     variant="secondary"
                     size="sm"
-                    onClick={() => handleCategoryToggle(slug)}
+                    onClick={() => toggleCategory(slug)}
                     className="h-7 text-xs"
                   >
                     {cat.name}
@@ -453,17 +463,14 @@ export default function ShopPage() {
                   <IconX className="w-3 h-3 ml-1" />
                 </Button>
               )}
-              {(sliderValue[0] > 0 || sliderValue[1] < 1000) && (
+              {(priceRange[0] > 0 || priceRange[1] < 1000) && (
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => {
-                    setSliderValue([0, 1000])
-                    setDebouncedPriceRange([0, 1000])
-                  }}
+                  onClick={() => setPriceRange([0, 1000])}
                   className="h-7 text-xs"
                 >
-                  ${sliderValue[0]} - ${sliderValue[1] === 1000 ? "1000+" : sliderValue[1]}
+                  ${priceRange[0]} - ${priceRange[1] === 1000 ? "1000+" : priceRange[1]}
                   <IconX className="w-3 h-3 ml-1" />
                 </Button>
               )}
@@ -486,7 +493,7 @@ export default function ShopPage() {
               <p className="text-muted-foreground mb-4">
                 Try adjusting your filters or check back later.
               </p>
-              {hasActiveFilters && (
+              {isFiltersActive && (
                 <Button variant="outline" onClick={clearAllFilters}>
                   Clear Filters
                 </Button>
@@ -506,7 +513,7 @@ export default function ShopPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    onClick={() => setPage(Math.max(1, page - 1))}
                     disabled={page === 1}
                   >
                     Previous
@@ -517,7 +524,7 @@ export default function ShopPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    onClick={() => setPage(Math.min(totalPages, page + 1))}
                     disabled={page === totalPages}
                   >
                     Next
