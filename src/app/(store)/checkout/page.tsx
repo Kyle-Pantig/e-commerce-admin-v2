@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useMemo, useEffect, useRef } from "react"
+import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { discountsApi } from "@/lib/api/services/discounts"
 import type { DiscountValidationResponse, DiscountCode } from "@/lib/api/services/discounts"
+import { addressesApi, type UserAddress } from "@/lib/api/services/addresses"
 import { Input } from "@/components/ui/input"
 import { IconTag, IconX } from "@tabler/icons-react"
 import { useRouter } from "next/navigation"
@@ -24,6 +25,13 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatPrice } from "@/lib/utils"
 import { toast } from "sonner"
@@ -67,10 +75,10 @@ type CheckoutFormData = z.infer<typeof checkoutSchema>
 const step1Schema = z.object({
   customer_name: z.string().min(2, "Name must be at least 2 characters"),
   customer_email: z.string().email("Invalid email address"),
-  customer_phone: z.string().optional(),
 })
 
 const step2Schema = z.object({
+  customer_phone: z.string().optional(),
   shipping_address: z.string().min(5, "Address must be at least 5 characters"),
   shipping_city: z.string().min(2, "City is required"),
   shipping_state: z.string().optional(),
@@ -143,11 +151,78 @@ export default function CheckoutPage() {
   const [isValidatingDiscount, setIsValidatingDiscount] = useState(false)
   const [autoApplyDiscount, setAutoApplyDiscount] = useState<DiscountCode | null>(null)
   const [autoFillUserInfo, setAutoFillUserInfo] = useState(false)
+  const [selectedAddressId, setSelectedAddressId] = useState<string>("")
 
   const DISCOUNT_STORAGE_KEY = "checkout_discount"
 
   // Use centralized auth for user info
   const { user: currentUser } = useAuth()
+
+  // Fetch user's saved addresses
+  const { data: savedAddresses = [] } = useQuery<UserAddress[]>({
+    queryKey: ["addresses"],
+    queryFn: () => addressesApi.list(),
+    enabled: isAuthenticated,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+
+  // Handle address selection
+  const handleAddressSelect = useCallback((addressId: string) => {
+    setSelectedAddressId(addressId)
+    
+    if (addressId === "new") {
+      // Clear form for new address entry
+      setValue("customer_phone", "")
+      setValue("shipping_address", "")
+      setValue("shipping_city", "")
+      setValue("shipping_state", "")
+      setValue("shipping_zip", "")
+      setValue("shipping_country", "Philippines")
+      setValue("billing_address", "")
+      setValue("billing_city", "")
+      setValue("billing_state", "")
+      setValue("billing_zip", "")
+      setValue("billing_country", "")
+      setValue("use_same_billing", true)
+      return
+    }
+
+    const address = savedAddresses.find(a => a.id === addressId)
+    if (address) {
+      // Fill phone number
+      setValue("customer_phone", address.phone || "")
+      
+      // Fill shipping fields
+      setValue("shipping_address", address.shippingAddress)
+      setValue("shipping_city", address.shippingCity)
+      setValue("shipping_state", address.shippingState || "")
+      setValue("shipping_zip", address.shippingZip || "")
+      setValue("shipping_country", address.shippingCountry)
+      
+      // Handle billing address based on type
+      if (address.type === "BOTH" && address.billingAddress) {
+        setValue("use_same_billing", false)
+        setValue("billing_address", address.billingAddress)
+        setValue("billing_city", address.billingCity || "")
+        setValue("billing_state", address.billingState || "")
+        setValue("billing_zip", address.billingZip || "")
+        setValue("billing_country", address.billingCountry || "")
+      } else if (address.type === "BILLING") {
+        // For billing-only addresses, use billing as shipping too
+        setValue("shipping_address", address.billingAddress || address.shippingAddress)
+        setValue("shipping_city", address.billingCity || address.shippingCity)
+        setValue("shipping_state", address.billingState || address.shippingState || "")
+        setValue("shipping_zip", address.billingZip || address.shippingZip || "")
+        setValue("shipping_country", address.billingCountry || address.shippingCountry)
+        setValue("use_same_billing", true)
+      } else {
+        setValue("use_same_billing", true)
+      }
+
+      // Trigger validation
+      trigger(["shipping_address", "shipping_city", "shipping_country"])
+    }
+  }, [savedAddresses, setValue, trigger])
 
   // Fetch auto-apply discounts
   const { data: autoApplyDiscounts = [] } = useQuery<DiscountCode[]>({
@@ -554,15 +629,12 @@ export default function CheckoutPage() {
   const createOrderMutation = useMutation({
     mutationFn: (data: OrderCreate) => ordersApi.create(data),
     onSuccess: (order) => {
-      toast.success("Order placed successfully!", {
-        description: `Order #${order.order_number} has been created.`,
-      })
       // Clear discount from storage after successful order
       if (typeof window !== "undefined") {
         localStorage.removeItem(DISCOUNT_STORAGE_KEY)
       }
       clearCart()
-      router.push(`/shop?order=${order.order_number}`)
+      router.push(`/thank-you?order=${order.order_number}`)
     },
     onError: (error: Error) => {
       toast.error("Failed to place order", {
@@ -629,9 +701,10 @@ export default function CheckoutPage() {
   const validateStep = async (step: number): Promise<boolean> => {
     switch (step) {
       case 1:
-        return await trigger(["customer_name", "customer_email", "customer_phone"])
+        return await trigger(["customer_name", "customer_email"])
       case 2: {
         const baseFields: (keyof CheckoutFormData)[] = [
+          "customer_phone",
           "shipping_address",
           "shipping_city",
           "shipping_country",
@@ -685,6 +758,18 @@ export default function CheckoutPage() {
       trigger("customer_email")
     }
   }, [autoFillUserInfo, currentUser, setValue, trigger])
+
+  // Auto-select default address when entering step 2
+  const hasAutoSelectedAddress = useRef(false)
+  useEffect(() => {
+    if (currentStep === 2 && savedAddresses.length > 0 && !hasAutoSelectedAddress.current && !selectedAddressId) {
+      const defaultAddress = savedAddresses.find(a => a.isDefault) || savedAddresses[0]
+      if (defaultAddress) {
+        hasAutoSelectedAddress.current = true
+        handleAddressSelect(defaultAddress.id)
+      }
+    }
+  }, [currentStep, savedAddresses, selectedAddressId, handleAddressSelect])
 
   // Redirect if not authenticated or cart is empty
   useEffect(() => {
@@ -873,19 +958,6 @@ export default function CheckoutPage() {
                       <FieldError>{errors.customer_email.message}</FieldError>
                     )}
                   </Field>
-
-                  <Field data-invalid={errors.customer_phone ? true : undefined}>
-                    <FieldLabel htmlFor="customer_phone">Phone Number</FieldLabel>
-                    <Input
-                      id="customer_phone"
-                      type="tel"
-                      {...register("customer_phone")}
-                      placeholder="+63 912 345 6789"
-                    />
-                    {errors.customer_phone && (
-                      <FieldError>{errors.customer_phone.message}</FieldError>
-                    )}
-                  </Field>
                 </FieldGroup>
               </div>
             )}
@@ -900,7 +972,47 @@ export default function CheckoutPage() {
                   </p>
                 </div>
 
+                {/* Saved Addresses Selector */}
+                {isAuthenticated && savedAddresses.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Select from saved addresses</Label>
+                    <Select value={selectedAddressId} onValueChange={handleAddressSelect}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose a saved address or enter new" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="new">Enter a new address</SelectItem>
+                        {savedAddresses.map((address) => (
+                          <SelectItem key={address.id} value={address.id}>
+                            <div className="flex flex-col items-start">
+                              <span className="font-medium">
+                                {address.label || (address.isDefault ? "Default Address" : address.shippingCity)}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {address.shippingAddress}, {address.shippingCity}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <FieldGroup>
+                  <Field data-invalid={errors.customer_phone ? true : undefined}>
+                    <FieldLabel htmlFor="customer_phone">Phone Number</FieldLabel>
+                    <Input
+                      id="customer_phone"
+                      type="tel"
+                      {...register("customer_phone")}
+                      placeholder="+63 912 345 6789"
+                    />
+                    {errors.customer_phone && (
+                      <FieldError>{errors.customer_phone.message}</FieldError>
+                    )}
+                  </Field>
+
                   <Field data-invalid={errors.shipping_address ? true : undefined}>
                     <FieldLabel htmlFor="shipping_address">Address *</FieldLabel>
                     <Input

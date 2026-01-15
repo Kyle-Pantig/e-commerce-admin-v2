@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react"
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { usersApi } from "@/lib/api"
 import type { User } from "@supabase/supabase-js"
@@ -25,12 +25,17 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+// Create supabase client once outside the component
+const supabase = createClient()
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const supabase = createClient()
   const [user, setUser] = useState<AuthUser | null>(null)
   const [supabaseUser, setSupabaseUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [authChecked, setAuthChecked] = useState(false)
+  
+  // Track initialization to prevent duplicate calls within same mount
+  const isInitializing = useRef(false)
 
   const fetchUserInfo = useCallback(async (authUser: User): Promise<AuthUser> => {
     let role = "CUSTOMER"
@@ -43,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name = userInfo.full_name || name
       isApproved = userInfo.is_approved ?? true
     } catch {
-      // If backend call fails, use defaults
+      // If backend call fails, use defaults from Supabase
     }
 
     return {
@@ -65,33 +70,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSupabaseUser(null)
       setUser(null)
     }
-  }, [supabase.auth, fetchUserInfo])
+  }, [fetchUserInfo])
 
   const logout = useCallback(async () => {
     await supabase.auth.signOut()
     setUser(null)
     setSupabaseUser(null)
-  }, [supabase.auth])
+  }, [])
 
   useEffect(() => {
     let mounted = true
 
     const initAuth = async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser()
-      
-      if (!mounted) return
+      // Prevent duplicate initialization within same mount cycle
+      if (isInitializing.current) return
+      isInitializing.current = true
 
-      if (authUser) {
-        setSupabaseUser(authUser)
-        const userInfo = await fetchUserInfo(authUser)
-        if (mounted) {
-          setUser(userInfo)
+      try {
+        // First, get the session - this ensures the session is restored from storage
+        const { data: { session } } = await supabase.auth.getSession()
+        
+        if (!mounted) return
+
+        if (session?.user) {
+          setSupabaseUser(session.user)
+          const userInfo = await fetchUserInfo(session.user)
+          if (mounted) {
+            setUser(userInfo)
+          }
+        } else {
+          // No session, try getUser as fallback (will refresh session if valid refresh token exists)
+          const { data: { user: authUser } } = await supabase.auth.getUser()
+          
+          if (!mounted) return
+
+          if (authUser) {
+            // Session should now be available after getUser()
+            setSupabaseUser(authUser)
+            const userInfo = await fetchUserInfo(authUser)
+            if (mounted) {
+              setUser(userInfo)
+            }
+          }
         }
-      }
-      
-      if (mounted) {
-        setIsLoading(false)
-        setAuthChecked(true)
+      } catch {
+        // Failed to initialize auth
+      } finally {
+        if (mounted) {
+          setIsLoading(false)
+          setAuthChecked(true)
+        }
+        isInitializing.current = false
       }
     }
 
@@ -100,13 +129,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
 
-      if (session?.user) {
-        setSupabaseUser(session.user)
-        const userInfo = await fetchUserInfo(session.user)
-        if (mounted) {
-          setUser(userInfo)
+      // Skip INITIAL_SESSION event - we handle it in initAuth
+      if (event === 'INITIAL_SESSION') {
+        return
+      }
+
+      // Handle explicit auth events only
+      if (event === 'SIGNED_IN') {
+        if (session?.user) {
+          setSupabaseUser(session.user)
+          const userInfo = await fetchUserInfo(session.user)
+          if (mounted) {
+            setUser(userInfo)
+            setIsLoading(false)
+            setAuthChecked(true)
+          }
         }
-      } else {
+      } else if (event === 'TOKEN_REFRESHED') {
+        // Just update the supabase user, no need to re-fetch from backend
+        if (session?.user) {
+          setSupabaseUser(session.user)
+        }
+      } else if (event === 'SIGNED_OUT') {
         setSupabaseUser(null)
         setUser(null)
       }
@@ -116,7 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted = false
       subscription.unsubscribe()
     }
-  }, [supabase.auth, fetchUserInfo])
+  }, [fetchUserInfo])
 
   const value: AuthContextValue = {
     user,

@@ -56,6 +56,14 @@ export const usersApi = {
   },
 
   /**
+   * Update current user's profile
+   * @param data - Profile update data
+   */
+  updateProfile: (data: { full_name?: string; phone?: string }): Promise<AuthUser> => {
+    return apiClient.patch<AuthUser>("/auth/me", data)
+  },
+
+  /**
    * Logout current user
    */
   logout: (): Promise<{ message: string }> => {

@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
+import Link from "next/link"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { addressesApi, type UserAddress, type UserAddressCreate, type UserAddressUpdate } from "@/lib/api"
+import { addressesApi, usersApi, type UserAddress, type UserAddressCreate, type UserAddressUpdate } from "@/lib/api"
 import { MaxWidthLayout } from "@/components/store"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -49,11 +50,19 @@ import {
   IconTrash,
   IconMapPin,
   IconLoader2,
+  IconUser,
+  IconLock,
+  IconPackage,
+  IconChevronRight,
 } from "@tabler/icons-react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
+import { useAuth } from "@/contexts/auth-context"
+import { cn } from "@/lib/utils"
+import { createClient } from "@/lib/supabase/client"
 
+// Schemas
 const addressSchema = z.object({
   type: z.enum(["SHIPPING", "BILLING", "BOTH"]),
   is_default: z.boolean(),
@@ -71,9 +80,388 @@ const addressSchema = z.object({
   label: z.string().optional().nullable(),
 })
 
+const profileSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters"),
+})
+
+const passwordSchema = z.object({
+  currentPassword: z.string().min(6, "Password must be at least 6 characters"),
+  newPassword: z.string().min(6, "Password must be at least 6 characters"),
+  confirmPassword: z.string().min(6, "Password must be at least 6 characters"),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+})
+
 type AddressFormData = z.infer<typeof addressSchema>
+type ProfileFormData = z.infer<typeof profileSchema>
+type PasswordFormData = z.infer<typeof passwordSchema>
+
+type Section = "profile" | "addresses" | "password"
+
+const sidebarNavItems = [
+  {
+    id: "profile" as const,
+    label: "Profile",
+    icon: IconUser,
+    description: "Manage your profile information",
+  },
+  {
+    id: "addresses" as const,
+    label: "Addresses",
+    icon: IconMapPin,
+    description: "Manage your saved addresses",
+  },
+  {
+    id: "password" as const,
+    label: "Change Password",
+    icon: IconLock,
+    description: "Update your password",
+  },
+]
 
 export default function AccountPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const { user, isLoading: authLoading, refreshUser } = useAuth()
+  const queryClient = useQueryClient()
+  const supabase = createClient()
+
+  const currentSection = (searchParams.get("section") as Section) || "profile"
+
+  const setSection = (section: Section) => {
+    router.push(`/account?section=${section}`)
+  }
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/login?redirect=/account")
+    }
+  }, [authLoading, user, router])
+
+  if (authLoading) {
+    return (
+      <MaxWidthLayout className="py-8">
+        <div className="flex gap-8">
+          <div className="w-64 shrink-0">
+            <Skeleton className="h-32 w-full mb-6" />
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          </div>
+          <div className="flex-1">
+            <Skeleton className="h-96 w-full" />
+          </div>
+        </div>
+      </MaxWidthLayout>
+    )
+  }
+
+  if (!user) {
+    return null
+  }
+
+  return (
+    <MaxWidthLayout className="py-8">
+      <div className="flex flex-col lg:flex-row">
+        {/* Sidebar */}
+        <aside className="w-full lg:w-64 shrink-0 pb-6 lg:pb-0 lg:pr-8">
+          {/* User Info */}
+          <div className="flex items-center gap-3 mb-6">
+            <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+              <IconUser className="h-6 w-6 text-primary" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold truncate">{user.name}</p>
+              <p className="text-sm text-muted-foreground truncate">{user.email}</p>
+            </div>
+          </div>
+
+          {/* Navigation */}
+          <nav className="space-y-1">
+            {sidebarNavItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setSection(item.id)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors",
+                  currentSection === item.id
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                )}
+              >
+                <item.icon className="h-5 w-5 shrink-0" />
+                <span className="font-medium">{item.label}</span>
+              </button>
+            ))}
+
+            <Separator className="my-2" />
+
+            {/* My Orders Link */}
+            <Link
+              href="/account/orders"
+              className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-left transition-colors hover:bg-muted"
+            >
+              <div className="flex items-center gap-3">
+                <IconPackage className="h-5 w-5 shrink-0" />
+                <span className="font-medium">My Orders</span>
+              </div>
+              <IconChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+          </nav>
+        </aside>
+
+        {/* Vertical Divider - only on desktop */}
+        <div className="hidden lg:block w-px bg-border shrink-0" />
+
+        {/* Mobile Divider */}
+        <Separator className="lg:hidden mb-6" />
+
+        {/* Main Content */}
+        <main className="flex-1 min-w-0 lg:pl-8">
+          {currentSection === "profile" && <ProfileSection user={user} refreshUser={refreshUser} />}
+          {currentSection === "addresses" && <AddressesSection />}
+          {currentSection === "password" && <PasswordSection />}
+        </main>
+      </div>
+    </MaxWidthLayout>
+  )
+}
+
+// Profile Section Component
+function ProfileSection({ user, refreshUser }: { user: { name: string; email: string | undefined }; refreshUser: () => Promise<void> }) {
+  const [isEditing, setIsEditing] = useState(false)
+  const supabase = createClient()
+
+  const form = useForm<ProfileFormData>({
+    resolver: zodResolver(profileSchema),
+    defaultValues: {
+      name: user.name,
+    },
+  })
+
+  useEffect(() => {
+    form.reset({ name: user.name })
+  }, [user.name, form])
+
+  const updateMutation = useMutation({
+    mutationFn: async (data: ProfileFormData) => {
+      // Update user metadata in Supabase
+      const { error } = await supabase.auth.updateUser({
+        data: { full_name: data.name }
+      })
+      if (error) throw error
+
+      // Also update in backend if the endpoint exists
+      try {
+        await usersApi.updateProfile({ full_name: data.name })
+      } catch {
+        // Backend update is optional
+      }
+    },
+    onSuccess: async () => {
+      await refreshUser()
+      setIsEditing(false)
+      toast.success("Profile updated successfully")
+    },
+    onError: (error: Error) => {
+      toast.error("Failed to update profile", {
+        description: error.message,
+      })
+    },
+  })
+
+  const onSubmit = (data: ProfileFormData) => {
+    updateMutation.mutate(data)
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Profile</h1>
+          <p className="text-muted-foreground">Manage your personal information</p>
+        </div>
+        {!isEditing && (
+          <Button variant="ghost" size="icon" onClick={() => setIsEditing(true)}>
+            <IconEdit className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+
+      <div>
+        {isEditing ? (
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 max-w-md">
+            <Field data-invalid={form.formState.errors.name ? true : undefined}>
+              <FieldLabel htmlFor="name">Full Name</FieldLabel>
+              <Input
+                id="name"
+                {...form.register("name")}
+                placeholder="Enter your full name"
+              />
+              {form.formState.errors.name && (
+                <FieldError>{form.formState.errors.name.message}</FieldError>
+              )}
+            </Field>
+
+            <Field>
+              <FieldLabel>Email Address</FieldLabel>
+              <Input
+                value={user.email || ""}
+                disabled
+                className="bg-muted"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Email address cannot be changed
+              </p>
+            </Field>
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsEditing(false)
+                  form.reset({ name: user.name })
+                }}
+                disabled={updateMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={updateMutation.isPending}>
+                {updateMutation.isPending && (
+                  <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Save Changes
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 max-w-md">
+            <div>
+              <Label className="text-muted-foreground text-sm">Full Name</Label>
+              <p className="font-medium mt-1">{user.name}</p>
+            </div>
+            <div>
+              <Label className="text-muted-foreground text-sm">Email Address</Label>
+              <p className="font-medium mt-1">{user.email}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Password Section Component
+function PasswordSection() {
+  const supabase = createClient()
+
+  const form = useForm<PasswordFormData>({
+    resolver: zodResolver(passwordSchema),
+    defaultValues: {
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: async (data: PasswordFormData) => {
+      // Re-authenticate with current password first
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user?.email) throw new Error("User not found")
+
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: data.currentPassword,
+      })
+      if (signInError) throw new Error("Current password is incorrect")
+
+      // Update password
+      const { error } = await supabase.auth.updateUser({
+        password: data.newPassword,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      form.reset()
+      toast.success("Password updated successfully")
+    },
+    onError: (error: Error) => {
+      toast.error("Failed to update password", {
+        description: error.message,
+      })
+    },
+  })
+
+  const onSubmit = (data: PasswordFormData) => {
+    updateMutation.mutate(data)
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Change Password</h1>
+        <p className="text-muted-foreground">Update your password to keep your account secure</p>
+      </div>
+
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 max-w-md">
+        <Field data-invalid={form.formState.errors.currentPassword ? true : undefined}>
+          <FieldLabel htmlFor="currentPassword">Current Password</FieldLabel>
+          <Input
+            id="currentPassword"
+            type="password"
+            {...form.register("currentPassword")}
+            placeholder="Enter current password"
+          />
+          {form.formState.errors.currentPassword && (
+            <FieldError>{form.formState.errors.currentPassword.message}</FieldError>
+          )}
+        </Field>
+
+        <Field data-invalid={form.formState.errors.newPassword ? true : undefined}>
+          <FieldLabel htmlFor="newPassword">New Password</FieldLabel>
+          <Input
+            id="newPassword"
+            type="password"
+            {...form.register("newPassword")}
+            placeholder="Enter new password"
+          />
+          {form.formState.errors.newPassword && (
+            <FieldError>{form.formState.errors.newPassword.message}</FieldError>
+          )}
+        </Field>
+
+        <Field data-invalid={form.formState.errors.confirmPassword ? true : undefined}>
+          <FieldLabel htmlFor="confirmPassword">Confirm New Password</FieldLabel>
+          <Input
+            id="confirmPassword"
+            type="password"
+            {...form.register("confirmPassword")}
+            placeholder="Confirm new password"
+          />
+          {form.formState.errors.confirmPassword && (
+            <FieldError>{form.formState.errors.confirmPassword.message}</FieldError>
+          )}
+        </Field>
+
+        <Button type="submit" disabled={updateMutation.isPending} className="mt-2">
+          {updateMutation.isPending && (
+            <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+          )}
+          Update Password
+        </Button>
+      </form>
+    </div>
+  )
+}
+
+// Addresses Section Component
+function AddressesSection() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingAddress, setEditingAddress] = useState<UserAddress | null>(null)
   const [deletingAddress, setDeletingAddress] = useState<UserAddress | null>(null)
@@ -108,10 +496,8 @@ export default function AccountPage() {
   const showShippingAddress = addressType === "BOTH" || addressType === "SHIPPING"
   const showBillingAddress = addressType === "BOTH" || addressType === "BILLING"
   
-  // Label suggestions
   const labelSuggestions = ["Home", "Work", "Office", "Other"]
 
-  // Populate form when editing address changes and dialog is open
   useEffect(() => {
     if (isDialogOpen && editingAddress) {
       form.reset({
@@ -131,7 +517,7 @@ export default function AccountPage() {
         label: editingAddress.label || null,
       })
     }
-  }, [isDialogOpen, editingAddress])
+  }, [isDialogOpen, editingAddress, form])
 
   const createMutation = useMutation({
     mutationFn: (data: UserAddressCreate) => addressesApi.create(data),
@@ -221,187 +607,137 @@ export default function AccountPage() {
 
   if (isLoading) {
     return (
-      <MaxWidthLayout className="py-12">
-        <div className="space-y-6">
-          <Skeleton className="h-8 w-48" />
-          <div className="grid gap-4 md:grid-cols-2">
-            {[1, 2].map((i) => (
-              <Skeleton key={i} className="h-64" />
-            ))}
-          </div>
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid gap-4 md:grid-cols-2">
+          {[1, 2].map((i) => (
+            <Skeleton key={i} className="h-64" />
+          ))}
         </div>
-      </MaxWidthLayout>
+      </div>
     )
   }
 
   return (
-    <MaxWidthLayout className="py-12">
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">My Account</h1>
-            <p className="text-muted-foreground mt-1">
-              Manage your saved addresses
-            </p>
-          </div>
-          <Button onClick={() => handleOpenDialog()}>
-            <IconPlus className="mr-2 h-4 w-4" />
-            Add Address
-          </Button>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Addresses</h1>
+          <p className="text-muted-foreground">Manage your saved addresses for faster checkout</p>
         </div>
+        <Button onClick={() => handleOpenDialog()}>
+          <IconPlus className="mr-2 h-4 w-4" />
+          Add Address
+        </Button>
+      </div>
 
-        {error && (
-          <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
-            <p className="text-sm text-destructive">
-              Error loading addresses: {error instanceof Error ? error.message : "Unknown error"}
-            </p>
-          </div>
-        )}
+      {error && (
+        <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+          <p className="text-sm text-destructive">
+            Error loading addresses: {error instanceof Error ? error.message : "Unknown error"}
+          </p>
+        </div>
+      )}
 
-        {addresses && Array.isArray(addresses) && addresses.length > 0 ? (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {addresses.map((address) => (
-              <Card key={address.id} className="flex flex-col">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <CardTitle className="flex items-center gap-2 flex-wrap">
-                        <IconMapPin className="h-5 w-5 flex-shrink-0" />
-                        <span className="truncate">
-                          {address.label || `${address.type} Address`}
-                        </span>
-                        {address.isDefault && (
-                          <Badge variant="default" className="text-xs">
-                            Default
-                          </Badge>
-                        )}
-                      </CardTitle>
-                      <CardDescription className="mt-1.5">
-                        {address.type}
-                      </CardDescription>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 ml-2 flex-shrink-0"
-                      onClick={() => handleOpenDialog(address)}
-                    >
-                      <IconEdit className="h-4 w-4" />
-                    </Button>
+      {addresses && Array.isArray(addresses) && addresses.length > 0 ? (
+        <div className="divide-y border-b">
+          {addresses.map((address) => (
+            <div key={address.id} className="py-4 first:pt-0">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <IconMapPin className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                    <span className="font-medium truncate">
+                      {address.label || `${address.type} Address`}
+                    </span>
+                    {address.isDefault && (
+                      <Badge variant="default" className="text-xs">
+                        Default
+                      </Badge>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      ({address.type})
+                    </span>
                   </div>
-                </CardHeader>
-                <CardContent className="flex-1 space-y-4">
-                  {address.phone && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-0.5">
-                        Phone Number
-                      </p>
-                      <p className="text-sm">{address.phone}</p>
-                    </div>
-                  )}
 
-                  {/* Shipping Address */}
-                  {(address.type === "SHIPPING" || address.type === "BOTH") && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                        Shipping Address
-                      </p>
-                      <div className="text-sm space-y-0.5">
-                        <p className="font-medium">{address.shippingAddress}</p>
+                  <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 text-sm mt-2">
+                    {address.phone && (
+                      <div>
+                        <p className="text-xs text-muted-foreground">Phone</p>
+                        <p>{address.phone}</p>
+                      </div>
+                    )}
+
+                    {(address.type === "SHIPPING" || address.type === "BOTH") && (
+                      <div>
+                        <p className="text-xs text-muted-foreground">Shipping</p>
+                        <p>{address.shippingAddress}</p>
                         <p className="text-muted-foreground">
                           {address.shippingCity}
                           {address.shippingState && `, ${address.shippingState}`}
                           {address.shippingZip && ` ${address.shippingZip}`}
                         </p>
-                        <p className="text-muted-foreground">
-                          {address.shippingCountry}
-                        </p>
+                        <p className="text-muted-foreground">{address.shippingCountry}</p>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Billing Address */}
-                  {(address.type === "BILLING" || address.type === "BOTH") && (
-                    <>
-                      {(address.type === "BOTH" || address.billingAddress) && (
-                        <Separator />
-                      )}
+                    {(address.type === "BILLING" || address.type === "BOTH") && address.billingAddress && (
                       <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                          Billing Address
+                        <p className="text-xs text-muted-foreground">Billing</p>
+                        <p>{address.billingAddress}</p>
+                        <p className="text-muted-foreground">
+                          {address.billingCity}
+                          {address.billingState && `, ${address.billingState}`}
+                          {address.billingZip && ` ${address.billingZip}`}
                         </p>
-                        <div className="text-sm space-y-0.5">
-                          {address.type === "BILLING" ? (
-                            <>
-                              <p className="font-medium">{address.billingAddress || address.shippingAddress}</p>
-                              <p className="text-muted-foreground">
-                                {address.billingCity || address.shippingCity}
-                                {address.billingState && `, ${address.billingState}`}
-                                {!address.billingState && address.shippingState && `, ${address.shippingState}`}
-                                {address.billingZip && ` ${address.billingZip}`}
-                                {!address.billingZip && address.shippingZip && ` ${address.shippingZip}`}
-                              </p>
-                              <p className="text-muted-foreground">
-                                {address.billingCountry || address.shippingCountry}
-                              </p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="font-medium">
-                                {address.billingAddress || address.shippingAddress}
-                              </p>
-                              <p className="text-muted-foreground">
-                                {address.billingCity || address.shippingCity}
-                                {address.billingState && `, ${address.billingState}`}
-                                {!address.billingState && address.shippingState && `, ${address.shippingState}`}
-                                {address.billingZip && ` ${address.billingZip}`}
-                                {!address.billingZip && address.shippingZip && ` ${address.shippingZip}`}
-                              </p>
-                              <p className="text-muted-foreground">
-                                {address.billingCountry || address.shippingCountry}
-                              </p>
-                            </>
-                          )}
-                        </div>
+                        <p className="text-muted-foreground">{address.billingCountry}</p>
                       </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <IconMapPin className="h-12 w-12 text-muted-foreground/30 mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No addresses saved</h3>
-              <p className="text-muted-foreground text-center mb-4">
-                Add your first address to make checkout faster
-              </p>
-              <Button onClick={() => handleOpenDialog()}>
-                <IconPlus className="mr-2 h-4 w-4" />
-                Add Address
-              </Button>
-            </CardContent>
-          </Card>
-        )}
+                    )}
+                  </div>
+                </div>
 
-        {/* Add/Edit Dialog */}
-        <Dialog open={isDialogOpen} onOpenChange={handleCloseDialog}>
-          <DialogContent className="max-w-2xl! h-[90vh]! flex flex-col p-0">
-            <DialogHeader className="flex-shrink-0 bg-background px-6 pt-6 pb-4 border-b">
-              <DialogTitle>
-                {editingAddress ? "Edit Address" : "Add New Address"}
-              </DialogTitle>
-              <DialogDescription>
-                {editingAddress
-                  ? "Update your address information"
-                  : "Save a new address for faster checkout"}
-              </DialogDescription>
-            </DialogHeader>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 flex-shrink-0"
+                  onClick={() => handleOpenDialog(address)}
+                >
+                  <IconEdit className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <IconMapPin className="h-12 w-12 text-muted-foreground/30 mb-4" />
+          <h3 className="text-lg font-semibold mb-2">No addresses saved</h3>
+          <p className="text-muted-foreground mb-4">
+            Add your first address to make checkout faster
+          </p>
+          <Button onClick={() => handleOpenDialog()}>
+            <IconPlus className="mr-2 h-4 w-4" />
+            Add Address
+          </Button>
+        </div>
+      )}
 
-            <form onSubmit={form.handleSubmit((data) => onSubmit(data))} className="flex flex-col flex-1 min-h-0">
-              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+      {/* Add/Edit Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={handleCloseDialog}>
+        <DialogContent className="max-w-2xl! h-[90vh]! flex flex-col p-0">
+          <DialogHeader className="flex-shrink-0 bg-background px-6 pt-6 pb-4 border-b">
+            <DialogTitle>
+              {editingAddress ? "Edit Address" : "Add New Address"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingAddress
+                ? "Update your address information"
+                : "Save a new address for faster checkout"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={form.handleSubmit((data) => onSubmit(data))} className="flex flex-col flex-1 min-h-0">
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
               <FieldGroup>
                 <Field data-invalid={form.formState.errors.label ? true : undefined}>
                   <FieldLabel htmlFor="label">Label (Optional)</FieldLabel>
@@ -680,91 +1016,86 @@ export default function AccountPage() {
                   </div>
                 </>
               )}
+            </div>
 
+            <div className="flex-shrink-0 bg-background px-6 py-4 border-t flex justify-between gap-3">
+              {editingAddress ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => {
+                    setDeletingAddress(editingAddress)
+                  }}
+                  disabled={createMutation.isPending || updateMutation.isPending}
+                >
+                  <IconTrash className="mr-2 h-4 w-4" />
+                  Delete
+                </Button>
+              ) : (
+                <div />
+              )}
+              <div className="flex gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleCloseDialog}
+                  disabled={
+                    createMutation.isPending || updateMutation.isPending
+                  }
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={createMutation.isPending || updateMutation.isPending}
+                >
+                  {(createMutation.isPending || updateMutation.isPending) && (
+                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  {editingAddress ? "Update Address" : "Add Address"}
+                </Button>
               </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-              <div className="flex-shrink-0 bg-background px-6 py-4 border-t flex justify-between gap-3">
-                {editingAddress ? (
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    onClick={() => {
-                      setDeletingAddress(editingAddress)
-                    }}
-                    disabled={createMutation.isPending || updateMutation.isPending}
-                  >
-                    <IconTrash className="mr-2 h-4 w-4" />
-                    Delete
-                  </Button>
-                ) : (
-                  <div />
-                )}
-                <div className="flex gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCloseDialog}
-                    disabled={
-                      createMutation.isPending || updateMutation.isPending
-                    }
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={createMutation.isPending || updateMutation.isPending}
-                  >
-                    {(createMutation.isPending || updateMutation.isPending) && (
-                      <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                    )}
-                    {editingAddress ? "Update Address" : "Add Address"}
-                  </Button>
-                </div>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
-
-        {/* Delete Confirmation */}
-        <AlertDialog
-          open={!!deletingAddress}
-          onOpenChange={(open) => {
-            // Prevent closing while delete is in progress
-            if (!open && !deleteMutation.isPending) {
-              setDeletingAddress(null)
-            }
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete Address?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to delete this address? This action cannot be
-                undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel
-                disabled={deleteMutation.isPending}
-              >
-                Cancel
-              </AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() =>
-                  deletingAddress && deleteMutation.mutate(deletingAddress.id)
-                }
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                disabled={deleteMutation.isPending}
-              >
-                {deleteMutation.isPending && (
-                  <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
-    </MaxWidthLayout>
+      {/* Delete Confirmation */}
+      <AlertDialog
+        open={!!deletingAddress}
+        onOpenChange={(open) => {
+          if (!open && !deleteMutation.isPending) {
+            setDeletingAddress(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Address?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this address? This action cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                deletingAddress && deleteMutation.mutate(deletingAddress.id)
+              }
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending && (
+                <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   )
 }

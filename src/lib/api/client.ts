@@ -81,26 +81,49 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const supabase = createClient()
-  const session = await supabase.auth.getSession()
   
-  if (!session.data.session?.access_token) {
+  // First try to get existing session
+  let { data: { session } } = await supabase.auth.getSession()
+  
+  // If no session, try to refresh it (handles page reload scenario)
+  if (!session?.access_token) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      // getUser() should have refreshed the session, try again
+      const refreshed = await supabase.auth.getSession()
+      session = refreshed.data.session
+    }
+  }
+  
+  if (!session?.access_token) {
     throw new ApiClientError("Not authenticated", 401)
   }
 
   return {
-    Authorization: `Bearer ${session.data.session.access_token}`,
+    Authorization: `Bearer ${session.access_token}`,
   }
 }
 
 export async function getAccessToken(): Promise<string> {
   const supabase = createClient()
-  const session = await supabase.auth.getSession()
   
-  if (!session.data.session?.access_token) {
+  // First try to get existing session
+  let { data: { session } } = await supabase.auth.getSession()
+  
+  // If no session, try to refresh it
+  if (!session?.access_token) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const refreshed = await supabase.auth.getSession()
+      session = refreshed.data.session
+    }
+  }
+  
+  if (!session?.access_token) {
     throw new ApiClientError("Not authenticated", 401)
   }
 
-  return session.data.session.access_token
+  return session.access_token
 }
 
 // =============================================================================

@@ -88,7 +88,7 @@ export default function ProductDetailPage() {
   const [justAddedToCart, setJustAddedToCart] = useState(false)
   
   // Cart and Wishlist hooks
-  const { addToCart, subtotal: cartSubtotal } = useCart()
+  const { addToCart, cartItems, localCartItems, isAuthenticated: isCartAuth } = useCart()
   const { isInWishlist, toggleWishlist, isAuthenticated: isWishlistAuth } = useWishlist()
 
   // Fetch product using public API
@@ -302,6 +302,36 @@ export default function ProductDetailPage() {
     return product?.stock ?? 0
   }, [matchingVariant, hasVariants, activeVariants, product])
 
+  // Get quantity already in cart for this product/variant
+  const quantityInCart = useMemo(() => {
+    if (!product) return 0
+    
+    const variantId = matchingVariant?.id || null
+    
+    // Check authenticated cart
+    if (isCartAuth && cartItems.length > 0) {
+      const cartItem = cartItems.find(
+        item => item.product_id === product.id && item.variant_id === variantId
+      )
+      return cartItem?.quantity || 0
+    }
+    
+    // Check local cart for guests
+    if (!isCartAuth && localCartItems.length > 0) {
+      const localItem = localCartItems.find(
+        item => item.product_id === product.id && item.variant_id === variantId
+      )
+      return localItem?.quantity || 0
+    }
+    
+    return 0
+  }, [product, matchingVariant, isCartAuth, cartItems, localCartItems])
+
+  // Calculate available quantity (stock minus what's already in cart)
+  const availableToAdd = useMemo(() => {
+    return Math.max(0, currentStock - quantityInCart)
+  }, [currentStock, quantityInCart])
+
   // Determine if we should show sale pricing
   const isOnSale = useMemo(() => {
     // Has auto-apply discount
@@ -358,8 +388,17 @@ export default function ProductDetailPage() {
   }
 
   const handleQuantityChange = (delta: number) => {
-    setQuantity(prev => Math.max(1, Math.min(prev + delta, currentStock)))
+    setQuantity(prev => Math.max(1, Math.min(prev + delta, availableToAdd)))
   }
+
+  // Reset quantity when variant changes or available quantity decreases
+  useEffect(() => {
+    if (availableToAdd > 0 && quantity > availableToAdd) {
+      setQuantity(Math.min(quantity, availableToAdd))
+    } else if (availableToAdd > 0 && quantity === 0) {
+      setQuantity(1)
+    }
+  }, [availableToAdd, matchingVariant?.id])
 
   // Handle Add to Cart - optimistic, no waiting
   const handleAddToCart = () => {
@@ -706,29 +745,39 @@ export default function ProductDetailPage() {
 
           {/* Quantity Selector */}
           {currentStock > 0 && (
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-medium">Quantity:</span>
-              <div className="flex items-center border rounded-lg">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleQuantityChange(-1)}
-                  disabled={quantity <= 1}
-                  className="h-10 w-10 rounded-r-none"
-                >
-                  <IconMinus className="h-4 w-4" />
-                </Button>
-                <span className="w-12 text-center font-medium">{quantity}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleQuantityChange(1)}
-                  disabled={quantity >= currentStock}
-                  className="h-10 w-10 rounded-l-none"
-                >
-                  <IconPlus className="h-4 w-4" />
-                </Button>
+            <div className="space-y-2">
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium">Quantity:</span>
+                <div className="flex items-center border rounded-lg">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleQuantityChange(-1)}
+                    disabled={quantity <= 1 || availableToAdd === 0}
+                    className="h-10 w-10 rounded-r-none"
+                  >
+                    <IconMinus className="h-4 w-4" />
+                  </Button>
+                  <span className="w-12 text-center font-medium">{availableToAdd === 0 ? 0 : quantity}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleQuantityChange(1)}
+                    disabled={quantity >= availableToAdd}
+                    className="h-10 w-10 rounded-l-none"
+                  >
+                    <IconPlus className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
+              {quantityInCart > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  You have {quantityInCart} in your cart
+                  {availableToAdd === 0 && (
+                    <span className="text-orange-500 ml-1">(max reached)</span>
+                  )}
+                </p>
+              )}
             </div>
           )}
 
@@ -742,6 +791,7 @@ export default function ProductDetailPage() {
               )}
               disabled={
                 currentStock === 0 ||
+                availableToAdd === 0 ||
                 (product.has_variants && (!allOptionsSelected || !matchingVariant))
               }
               onClick={handleAddToCart}
@@ -760,7 +810,9 @@ export default function ProductDetailPage() {
                       ? "Unavailable"
                       : currentStock === 0
                         ? "Out of Stock"
-                        : "Add to Cart"}
+                        : availableToAdd === 0
+                          ? "Max in Cart"
+                          : "Add to Cart"}
                 </>
               )}
             </Button>

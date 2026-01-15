@@ -53,7 +53,7 @@ function MenuIcon({ isOpen }: { isOpen: boolean }) {
 export function StoreNavbar() {
   const router = useRouter()
   const pathname = usePathname()
-  const { user, isLoading, logout } = useAuth()
+  const { user, authChecked, logout } = useAuth()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { wishlistCount, isAuthenticated: isWishlistAuth } = useWishlist()
   const { totalQuantity: cartCount } = useCart()
@@ -140,64 +140,68 @@ export function StoreNavbar() {
               </Button>
             </Link>
 
-            {!isLoading && (
-              <>
-                {user ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="hidden md:flex">
-                        <User className="h-5 w-5" />
-                        <span className="sr-only">Account</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-64">
-                      <div className="px-2 py-1.5">
-                        <p className="text-sm font-medium">{user.name}</p>
-                        <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem asChild>
-                        <Link href="/account">My Account</Link>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem asChild>
-                        <Link href="/account/orders">My Orders</Link>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem asChild>
-                        <Link href="/wishlist" className="flex items-center justify-between">
-                          My Wishlist
-                          {wishlistCount > 0 && (
-                            <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded-full">
-                              {wishlistCount}
-                            </span>
-                          )}
-                        </Link>
-                      </DropdownMenuItem>
-                      {isAdmin && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem asChild>
-                            <Link href="/dashboard" className="text-primary">
-                              Admin Dashboard
-                            </Link>
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={handleLogout} className="text-destructive">
-                        <LogOut className="mr-2 h-4 w-4" />
-                        Logout
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                ) : (
-                  <Link href="/login" className="hidden md:block">
-                    <Button variant="default" size="sm">
-                      Login
+            {/* Desktop: User menu - always show icon to prevent layout shift */}
+            <div className="hidden md:flex">
+              {!authChecked ? (
+                <Button variant="ghost" size="icon" disabled className="opacity-50">
+                  <User className="h-5 w-5" />
+                  <span className="sr-only">Loading...</span>
+                </Button>
+              ) : user ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon">
+                      <User className="h-5 w-5" />
+                      <span className="sr-only">Account</span>
                     </Button>
-                  </Link>
-                )}
-              </>
-            )}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <div className="px-2 py-1.5">
+                      <p className="text-sm font-medium">{user.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                    </div>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link href="/account">My Account</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/account/orders">My Orders</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/wishlist" className="flex items-center justify-between">
+                        My Wishlist
+                        {wishlistCount > 0 && (
+                          <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded-full">
+                            {wishlistCount}
+                          </span>
+                        )}
+                      </Link>
+                    </DropdownMenuItem>
+                    {isAdmin && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem asChild>
+                          <Link href="/dashboard" className="text-primary">
+                            Admin Dashboard
+                          </Link>
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Logout
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Link href="/login">
+                  <Button variant="default" size="sm">
+                    Login
+                  </Button>
+                </Link>
+              )}
+            </div>
 
             {/* Mobile menu toggle */}
             <Button
@@ -264,77 +268,80 @@ export function StoreNavbar() {
                 <div className="my-6 border-t" />
 
                 {/* User Section */}
-                {!isLoading && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
-                    className="space-y-3"
-                  >
-                    {user ? (
-                      <>
-                        <div className="pb-3 border-b">
-                          <p className="font-medium">{user.name}</p>
-                          <p className="text-sm text-muted-foreground">{user.email}</p>
-                        </div>
-                        <Link
-                          href="/account"
-                          className="block py-2 text-sm hover:text-primary transition-colors"
-                          onClick={() => setMobileMenuOpen(false)}
-                        >
-                          My Account
-                        </Link>
-                        <Link
-                          href="/account/orders"
-                          className="block py-2 text-sm hover:text-primary transition-colors"
-                          onClick={() => setMobileMenuOpen(false)}
-                        >
-                          My Orders
-                        </Link>
-                        <Link
-                          href="/wishlist"
-                          className="flex items-center gap-2 py-2 text-sm hover:text-primary transition-colors"
-                          onClick={() => setMobileMenuOpen(false)}
-                        >
-                          <Heart className="h-4 w-4" />
-                          My Wishlist
-                          {wishlistCount > 0 && (
-                            <span className="ml-auto text-xs bg-red-500 text-white px-1.5 py-0.5 rounded-full">
-                              {wishlistCount}
-                            </span>
-                          )}
-                        </Link>
-                        {isAdmin && (
-                          <Link
-                            href="/dashboard"
-                            className="block py-2 text-sm text-primary font-medium"
-                            onClick={() => setMobileMenuOpen(false)}
-                          >
-                            Admin Dashboard
-                          </Link>
-                        )}
-                        <button
-                          onClick={handleLogout}
-                          className="flex items-center py-2 text-sm text-destructive hover:text-destructive/80 transition-colors"
-                        >
-                          <LogOut className="mr-2 h-4 w-4" />
-                          Logout
-                        </button>
-                      </>
-                    ) : (
-                      <div className="space-y-3">
-                        <Link href="/login" onClick={() => setMobileMenuOpen(false)}>
-                          <Button className="w-full">Login</Button>
-                        </Link>
-                        <Link href="/signup" onClick={() => setMobileMenuOpen(false)}>
-                          <Button variant="outline" className="w-full">
-                            Create Account
-                          </Button>
-                        </Link>
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="space-y-3"
+                >
+                  {!authChecked ? (
+                    <div className="flex items-center gap-3 py-2 text-muted-foreground">
+                      <User className="h-5 w-5 animate-pulse" />
+                      <span className="text-sm">Loading...</span>
+                    </div>
+                  ) : user ? (
+                    <>
+                      <div className="pb-3 border-b">
+                        <p className="font-medium">{user.name}</p>
+                        <p className="text-sm text-muted-foreground">{user.email}</p>
                       </div>
-                    )}
-                  </motion.div>
-                )}
+                      <Link
+                        href="/account"
+                        className="block py-2 text-sm hover:text-primary transition-colors"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        My Account
+                      </Link>
+                      <Link
+                        href="/account/orders"
+                        className="block py-2 text-sm hover:text-primary transition-colors"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        My Orders
+                      </Link>
+                      <Link
+                        href="/wishlist"
+                        className="flex items-center gap-2 py-2 text-sm hover:text-primary transition-colors"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        <Heart className="h-4 w-4" />
+                        My Wishlist
+                        {wishlistCount > 0 && (
+                          <span className="ml-auto text-xs bg-red-500 text-white px-1.5 py-0.5 rounded-full">
+                            {wishlistCount}
+                          </span>
+                        )}
+                      </Link>
+                      {isAdmin && (
+                        <Link
+                          href="/dashboard"
+                          className="block py-2 text-sm text-primary font-medium"
+                          onClick={() => setMobileMenuOpen(false)}
+                        >
+                          Admin Dashboard
+                        </Link>
+                      )}
+                      <button
+                        onClick={handleLogout}
+                        className="flex items-center py-2 text-sm text-destructive hover:text-destructive/80 transition-colors"
+                      >
+                        <LogOut className="mr-2 h-4 w-4" />
+                        Logout
+                      </button>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <Link href="/login" onClick={() => setMobileMenuOpen(false)}>
+                        <Button className="w-full">Login</Button>
+                      </Link>
+                      <Link href="/signup" onClick={() => setMobileMenuOpen(false)}>
+                        <Button variant="outline" className="w-full">
+                          Create Account
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </motion.div>
               </nav>
             </motion.div>
           </>
