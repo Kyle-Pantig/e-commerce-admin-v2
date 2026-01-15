@@ -34,8 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const [authChecked, setAuthChecked] = useState(false)
   
-  // Track initialization to prevent duplicate calls within same mount
-  const isInitializing = useRef(false)
+  // Track if this specific mount has completed initialization
+  const initCompleted = useRef(false)
 
   const fetchUserInfo = useCallback(async (authUser: User): Promise<AuthUser> => {
     let role = "CUSTOMER"
@@ -82,9 +82,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let mounted = true
 
     const initAuth = async () => {
-      // Prevent duplicate initialization within same mount cycle
-      if (isInitializing.current) return
-      isInitializing.current = true
+      // Skip if this mount already completed initialization
+      if (initCompleted.current) {
+        // Still mark as checked in case state was reset
+        setIsLoading(false)
+        setAuthChecked(true)
+        return
+      }
 
       try {
         // First, get the session - this ensures the session is restored from storage
@@ -96,7 +100,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSupabaseUser(session.user)
           const userInfo = await fetchUserInfo(session.user)
           if (mounted) {
+            // Set user AND authChecked together to prevent flash
             setUser(userInfo)
+            setIsLoading(false)
+            setAuthChecked(true)
+            initCompleted.current = true
           }
         } else {
           // No session, try getUser as fallback (will refresh session if valid refresh token exists)
@@ -109,18 +117,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setSupabaseUser(authUser)
             const userInfo = await fetchUserInfo(authUser)
             if (mounted) {
+              // Set user AND authChecked together to prevent flash
               setUser(userInfo)
+              setIsLoading(false)
+              setAuthChecked(true)
+              initCompleted.current = true
+            }
+          } else {
+            // No user found - mark as checked (will show Login button)
+            if (mounted) {
+              setIsLoading(false)
+              setAuthChecked(true)
+              initCompleted.current = true
             }
           }
         }
       } catch {
-        // Failed to initialize auth
-      } finally {
+        // Failed to initialize auth - still mark as checked
         if (mounted) {
           setIsLoading(false)
           setAuthChecked(true)
+          initCompleted.current = true
         }
-        isInitializing.current = false
       }
     }
 
@@ -156,9 +174,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     })
 
+    // Safety fallback: ensure authChecked is set after 2 seconds max
+    // This prevents the UI from being stuck in loading state
+    const fallbackTimer = setTimeout(() => {
+      if (mounted) {
+        setIsLoading(false)
+        setAuthChecked(true)
+      }
+    }, 2000)
+
     return () => {
       mounted = false
       subscription.unsubscribe()
+      clearTimeout(fallbackTimer)
     }
   }, [fetchUserInfo])
 

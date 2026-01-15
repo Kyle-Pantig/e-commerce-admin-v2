@@ -38,6 +38,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { useShopFilters } from "@/stores"
 
 const SORT_OPTIONS = [
   { value: "newest-desc", label: "Newest First" },
@@ -58,24 +59,48 @@ const PRICE_RANGES = [
 export default function ShopCategoryPage() {
   const params = useParams()
   const slug = params.slug as string
-  const [page, setPage] = useState(1)
-  const [sortBy, setSortBy] = useState("newest-desc")
-  const [showOnSale, setShowOnSale] = useState(false)
-  const [showInStock, setShowInStock] = useState(false)
+  
+  // Use Zustand store for shared filter state
+  const {
+    sortBy,
+    priceRange,
+    showOnSale,
+    showInStock,
+    page,
+    priceOpen,
+    availabilityOpen,
+    setSortBy,
+    setPriceRange,
+    setShowOnSale,
+    setShowInStock,
+    setPage,
+    setPriceOpen,
+    setAvailabilityOpen,
+  } = useShopFilters()
+
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   
-  // Price range - local state for smooth slider, debounced for API
-  const [sliderValue, setSliderValue] = useState<[number, number]>([0, 1000])
-  const [debouncedPriceRange, setDebouncedPriceRange] = useState<[number, number]>([0, 1000])
+  // Local slider state for smooth sliding, synced with store
+  const [sliderValue, setSliderValue] = useState<[number, number]>(priceRange)
+  const [debouncedPriceRange, setDebouncedPriceRange] = useState<[number, number]>(priceRange)
   const debounceRef = useRef<NodeJS.Timeout | null>(null)
   
-  // Debounce price range changes
+  // Sync slider with store when store changes
+  useEffect(() => {
+    setSliderValue(priceRange)
+    setDebouncedPriceRange(priceRange)
+  }, [priceRange])
+  
+  // Debounce slider changes and update store
   useEffect(() => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current)
     }
     debounceRef.current = setTimeout(() => {
       setDebouncedPriceRange(sliderValue)
+      if (sliderValue[0] !== priceRange[0] || sliderValue[1] !== priceRange[1]) {
+        setPriceRange(sliderValue)
+      }
     }, 500)
     
     return () => {
@@ -83,11 +108,7 @@ export default function ShopCategoryPage() {
         clearTimeout(debounceRef.current)
       }
     }
-  }, [sliderValue])
-  
-  // Collapsible states
-  const [priceOpen, setPriceOpen] = useState(true)
-  const [availabilityOpen, setAvailabilityOpen] = useState(true)
+  }, [sliderValue, priceRange, setPriceRange])
   
   const perPage = 12
 
@@ -183,15 +204,15 @@ export default function ShopCategoryPage() {
   const products = filteredProducts
   const totalPages = productsData?.total_pages ?? 1
 
-  const clearAllFilters = () => {
-    setSliderValue([0, 1000])
-    setDebouncedPriceRange([0, 1000])
+  // Clear only price/availability filters (not category - that's from URL)
+  const clearCategoryFilters = () => {
+    setPriceRange([0, 1000])
     setShowOnSale(false)
     setShowInStock(false)
     setPage(1)
   }
 
-  const hasActiveFilters = showOnSale || showInStock || sliderValue[0] > 0 || sliderValue[1] < 1000
+  const hasActiveFilters = showOnSale || showInStock || priceRange[0] > 0 || priceRange[1] < 1000
 
   // Memoized slider change handler for smooth sliding
   const handleSliderChange = useCallback((value: number[]) => {
@@ -209,7 +230,7 @@ export default function ShopCategoryPage() {
         <Button 
           variant="ghost" 
           size="sm" 
-          onClick={clearAllFilters}
+          onClick={clearCategoryFilters}
           className="w-full justify-start text-muted-foreground hover:text-foreground"
         >
           <IconX className="w-4 h-4 mr-2" />
@@ -388,7 +409,7 @@ export default function ShopCategoryPage() {
                       Filters
                       {hasActiveFilters && (
                         <span className="ml-2 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
-                          {(showOnSale ? 1 : 0) + (showInStock ? 1 : 0) + (sliderValue[0] > 0 || sliderValue[1] < 1000 ? 1 : 0)}
+                          {(showOnSale ? 1 : 0) + (showInStock ? 1 : 0) + (priceRange[0] > 0 || priceRange[1] < 1000 ? 1 : 0)}
                         </span>
                       )}
                     </Button>
@@ -443,17 +464,14 @@ export default function ShopCategoryPage() {
                     <IconX className="w-3 h-3 ml-1" />
                   </Button>
                 )}
-                {(sliderValue[0] > 0 || sliderValue[1] < 1000) && (
+                {(priceRange[0] > 0 || priceRange[1] < 1000) && (
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() => {
-                      setSliderValue([0, 1000])
-                      setDebouncedPriceRange([0, 1000])
-                    }}
+                    onClick={() => setPriceRange([0, 1000])}
                     className="h-7 text-xs"
                   >
-                    ${sliderValue[0]} - ${sliderValue[1] === 1000 ? "1000+" : sliderValue[1]}
+                    ${priceRange[0]} - ${priceRange[1] === 1000 ? "1000+" : priceRange[1]}
                     <IconX className="w-3 h-3 ml-1" />
                   </Button>
                 )}
@@ -479,7 +497,7 @@ export default function ShopCategoryPage() {
                     : "There are no products in this category yet."}
                 </p>
                 {hasActiveFilters ? (
-                  <Button variant="outline" onClick={clearAllFilters}>
+                  <Button variant="outline" onClick={clearCategoryFilters}>
                     Clear Filters
                   </Button>
                 ) : (
@@ -502,7 +520,7 @@ export default function ShopCategoryPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      onClick={() => setPage(Math.max(1, page - 1))}
                       disabled={page === 1}
                     >
                       Previous
@@ -513,7 +531,7 @@ export default function ShopCategoryPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      onClick={() => setPage(Math.min(totalPages, page + 1))}
                       disabled={page === totalPages}
                     >
                       Next
