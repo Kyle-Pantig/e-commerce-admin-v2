@@ -41,6 +41,7 @@ export interface PublicProductListParams {
   per_page?: number
   category_slug?: string
   is_featured?: boolean
+  is_new?: boolean
   search?: string
   sort_by?: "created_at" | "name" | "base_price" | "price" | "newest"
   sort_order?: "asc" | "desc"

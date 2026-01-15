@@ -30,7 +30,7 @@ export const orderFormSchema = z.object({
   billing_zip: z.string().optional(),
   billing_country: z.string().optional(),
   
-  payment_method: z.enum(["CASH_ON_DELIVERY", "CREDIT_CARD", "DEBIT_CARD", "BANK_TRANSFER", "DIGITAL_WALLET", "OTHER"]).optional(),
+  payment_method: z.enum(["CASH_ON_DELIVERY", "STRIPE"]).optional(),
   
   shipping_cost: z.number().min(0).default(0),
   tax_amount: z.number().min(0).default(0),

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth_router, categories_router, upload_router, attributes_router, products_router, orders_router, analytics_router, inventory_router, discounts_router, shipping_router, tax_router, site_content_router
+from routers import auth_router, categories_router, upload_router, attributes_router, products_router, orders_router, analytics_router, inventory_router, discounts_router, shipping_router, tax_router, site_content_router, wishlist_router, cart_router, addresses_router
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from prisma_client import get_prisma_client, disconnect_prisma
@@ -58,6 +58,9 @@ app.include_router(discounts_router)
 app.include_router(shipping_router)
 app.include_router(tax_router)
 app.include_router(site_content_router)
+app.include_router(wishlist_router)
+app.include_router(cart_router)
+app.include_router(addresses_router)
 
 
 @app.get("/")

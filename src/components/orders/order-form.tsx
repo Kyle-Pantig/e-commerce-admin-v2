@@ -151,11 +151,7 @@ interface OrderFormProps {
 
 const paymentMethods: { value: PaymentMethod; label: string }[] = [
   { value: "CASH_ON_DELIVERY", label: "Cash on Delivery" },
-  { value: "CREDIT_CARD", label: "Credit Card" },
-  { value: "DEBIT_CARD", label: "Debit Card" },
-  { value: "BANK_TRANSFER", label: "Bank Transfer" },
-  { value: "DIGITAL_WALLET", label: "Digital Wallet" },
-  { value: "OTHER", label: "Other" },
+  { value: "STRIPE", label: "Stripe" },
 ]
 
 export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
@@ -243,7 +239,7 @@ export function OrderForm({ currentUserRole, currentUser }: OrderFormProps) {
   
   // Calculate auto-apply discount
   const autoDiscountResult = calculateTotalDiscount(watchItems, autoApplyDiscounts, subtotal)
-  const effectiveDiscount = discountValidation?.valid ? watchDiscountAmount : autoDiscountResult.totalDiscount
+  const effectiveDiscount = discountValidation?.valid ? (watchDiscountAmount || 0) : (autoDiscountResult.totalDiscount || 0)
   
   // Auto-calculate shipping when items change
   useEffect(() => {

@@ -113,6 +113,7 @@ class DiscountValidationRequest(BaseModel):
 class DiscountValidationResponse(BaseModel):
     valid: bool
     code: Optional[str] = None
+    discount_id: Optional[str] = None  # ID of the discount code for order creation
     discount_type: Optional[str] = None
     discount_value: Optional[float] = None
     discount_amount: Optional[float] = None  # Actual calculated discount

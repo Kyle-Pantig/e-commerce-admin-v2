@@ -13,6 +13,9 @@ from .discounts import router as discounts_router
 from .shipping import router as shipping_router
 from .tax import router as tax_router
 from .site_content import router as site_content_router
+from .wishlist import router as wishlist_router
+from .cart import router as cart_router
+from .addresses import router as addresses_router
 
 __all__ = [
     "auth_router",
@@ -27,5 +30,8 @@ __all__ = [
     "shipping_router",
     "tax_router",
     "site_content_router",
+    "wishlist_router",
+    "cart_router",
+    "addresses_router",
 ]
 

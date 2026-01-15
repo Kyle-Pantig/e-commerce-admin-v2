@@ -48,7 +48,9 @@ model User {
 
   // Relations
   orders      Order[]
-  cart        Cart?     // One cart per user
+  cart        Cart?       // One cart per user
+  wishlist    Wishlist?   // One wishlist per user
+  addresses   UserAddress[] // User saved addresses
 
   // Performance indexes
   @@index([isApproved])                    // Approval status filtering
@@ -57,6 +59,55 @@ model User {
   @@index([role, isApproved])              // Combined role and approval queries
   @@index([emailVerified])                 // Email verification status
   @@map("users")
+}
+
+// ==========================================
+// USER ADDRESSES
+// ==========================================
+
+enum AddressType {
+  SHIPPING
+  BILLING
+  BOTH
+}
+
+model UserAddress {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  
+  // Address type
+  type        AddressType @default(BOTH)
+  isDefault   Boolean     @default(false) @map("is_default")
+  
+  // Contact information
+  phone       String?
+  
+  // Shipping address
+  shippingAddress String   @map("shipping_address")
+  shippingCity    String   @map("shipping_city")
+  shippingState   String?  @map("shipping_state")
+  shippingZip     String?  @map("shipping_zip")
+  shippingCountry String   @default("Philippines") @map("shipping_country")
+  
+  // Billing address (optional, if different from shipping)
+  billingAddress  String?  @map("billing_address")
+  billingCity     String?  @map("billing_city")
+  billingState    String?  @map("billing_state")
+  billingZip      String?  @map("billing_zip")
+  billingCountry  String?  @map("billing_country")
+  
+  // Label for easy identification (e.g., "Home", "Work", "Office")
+  label       String?     // e.g., "Home", "Work"
+  
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  
+  // Relations
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([userId, isDefault])
+  @@map("user_addresses")
 }
 
 // OTP Verification for customer signup/login
@@ -97,6 +148,42 @@ model Cart {
   items       CartItem[]
   
   @@map("carts")
+}
+
+// ==========================================
+// WISHLIST
+// ==========================================
+
+model Wishlist {
+  id          String         @id @default(uuid())
+  userId      String         @unique @map("user_id")
+  
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  
+  // Relations
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items       WishlistItem[]
+  
+  @@map("wishlists")
+}
+
+model WishlistItem {
+  id          String   @id @default(uuid())
+  wishlistId  String   @map("wishlist_id")
+  productId   String   @map("product_id")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  wishlist    Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  // Unique constraint: one product per wishlist
+  @@unique([wishlistId, productId])
+  @@index([wishlistId])
+  @@index([productId])
+  @@map("wishlist_items")
 }
 
 model CartItem {
@@ -295,6 +382,7 @@ model Product {
   orderItems       OrderItem[]
   stockAdjustments StockAdjustment[]
   cartItems        CartItem[]
+  wishlistItems    WishlistItem[]
 
   @@index([categoryId])
   @@index([status])
@@ -461,11 +549,7 @@ enum PaymentStatus {
 
 enum PaymentMethod {
   CASH_ON_DELIVERY
-  CREDIT_CARD
-  DEBIT_CARD
-  BANK_TRANSFER
-  DIGITAL_WALLET
-  OTHER
+  STRIPE
 }
 
 model Order {

@@ -68,7 +68,7 @@ export const shippingApi = {
    * List shipping rules with pagination and filters
    */
   list: async (params: ShippingRuleListParams = {}): Promise<ShippingRuleListResponse> => {
-    const queryString = buildQueryString(params)
+    const queryString = buildQueryString(params as Record<string, unknown>)
     return apiClient.get<ShippingRuleListResponse>(`/shipping${queryString}`)
   },
 

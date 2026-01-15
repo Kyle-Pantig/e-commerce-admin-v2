@@ -91,6 +91,7 @@ export interface DiscountValidationRequest {
 export interface DiscountValidationResponse {
   valid: boolean
   code: string | null
+  discount_id: string | null
   discount_type: DiscountType | null
   discount_value: number | null
   discount_amount: number | null
@@ -103,7 +104,7 @@ export const discountsApi = {
    * List discount codes with pagination and filters
    */
   list: async (params: DiscountCodeListParams = {}): Promise<DiscountCodeListResponse> => {
-    const queryString = buildQueryString(params)
+    const queryString = buildQueryString(params as Record<string, unknown>)
     return apiClient.get<DiscountCodeListResponse>(`/discounts${queryString}`)
   },
 
@@ -161,14 +162,14 @@ export const discountsApi = {
    */
   getProductDiscounts: async (productId: string, variantId?: string): Promise<DiscountCode[]> => {
     const query = variantId ? `?variant_id=${variantId}` : ""
-    return apiClient.get<DiscountCode[]>(`/discounts/product/${productId}${query}`)
+    return apiClient.get<DiscountCode[]>(`/discounts/product/${productId}${query}`, { skipAuth: true })
   },
 
   /**
-   * Get all active auto-apply discounts with badges (for admin order form)
+   * Get all active auto-apply discounts with badges (public endpoint - for store and admin)
    */
   getAutoApplyDiscounts: async (): Promise<DiscountCode[]> => {
-    return apiClient.get<DiscountCode[]>("/discounts/auto-apply/all")
+    return apiClient.get<DiscountCode[]>("/discounts/auto-apply/all", { skipAuth: true })
   },
 }
 

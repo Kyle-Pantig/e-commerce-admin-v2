@@ -1,5 +1,6 @@
 import { StoreNavbar } from "@/components/store/navbar"
 import { StoreFooter } from "@/components/store/footer"
+import { StoreProviders } from "@/components/store/store-providers"
 
 export default function StoreLayout({
   children,
@@ -7,10 +8,12 @@ export default function StoreLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex min-h-screen flex-col">
-      <StoreNavbar />
-      <main className="flex-1">{children}</main>
-      <StoreFooter />
-    </div>
+    <StoreProviders>
+      <div className="flex min-h-screen flex-col">
+        <StoreNavbar />
+        <main className="flex-1">{children}</main>
+        <StoreFooter />
+      </div>
+    </StoreProviders>
   )
 }

@@ -1,14 +1,24 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
-import { IconShoppingCart } from "@tabler/icons-react"
+import { 
+  IconShoppingCart, 
+  IconFilter, 
+  IconX,
+  IconChevronDown,
+  IconChevronUp,
+} from "@tabler/icons-react"
 import { productsApi, categoriesApi } from "@/lib/api"
 import { MaxWidthLayout, ProductCard, ProductCardSkeleton } from "@/components/store"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
+import { Slider } from "@/components/ui/slider"
+import { Separator } from "@/components/ui/separator"
 import {
   Select,
   SelectContent,
@@ -16,6 +26,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 
 const SORT_OPTIONS = [
   { value: "newest-desc", label: "Newest First" },
@@ -25,11 +47,48 @@ const SORT_OPTIONS = [
   { value: "price-desc", label: "Price: High to Low" },
 ]
 
+const PRICE_RANGES = [
+  { label: "Under $25", min: 0, max: 25 },
+  { label: "$25 - $50", min: 25, max: 50 },
+  { label: "$50 - $100", min: 50, max: 100 },
+  { label: "$100 - $200", min: 100, max: 200 },
+  { label: "Over $200", min: 200, max: 10000 },
+]
+
 export default function ShopCategoryPage() {
   const params = useParams()
   const slug = params.slug as string
   const [page, setPage] = useState(1)
   const [sortBy, setSortBy] = useState("newest-desc")
+  const [showOnSale, setShowOnSale] = useState(false)
+  const [showInStock, setShowInStock] = useState(false)
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+  
+  // Price range - local state for smooth slider, debounced for API
+  const [sliderValue, setSliderValue] = useState<[number, number]>([0, 1000])
+  const [debouncedPriceRange, setDebouncedPriceRange] = useState<[number, number]>([0, 1000])
+  const debounceRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Debounce price range changes
+  useEffect(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current)
+    }
+    debounceRef.current = setTimeout(() => {
+      setDebouncedPriceRange(sliderValue)
+    }, 500)
+    
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+      }
+    }
+  }, [sliderValue])
+  
+  // Collapsible states
+  const [priceOpen, setPriceOpen] = useState(true)
+  const [availabilityOpen, setAvailabilityOpen] = useState(true)
+  
   const perPage = 12
 
   // Parse sort option
@@ -62,7 +121,7 @@ export default function ShopCategoryPage() {
 
   // Fetch products
   const { data: productsData, isLoading: productsLoading } = useQuery({
-    queryKey: ["products", "public", slug, page, sortField, sortOrder],
+    queryKey: ["products", "public", slug, page, sortField, sortOrder, debouncedPriceRange, showOnSale, showInStock],
     queryFn: () => productsApi.listPublic({
       category_slug: slug,
       page,
@@ -73,9 +132,206 @@ export default function ShopCategoryPage() {
     staleTime: 2 * 60 * 1000,
   })
 
-  const products = productsData?.items ?? []
+  // Filter products on frontend based on active filters
+  const filteredProducts = useMemo(() => {
+    let items = productsData?.items ?? []
+    
+    // Filter by price range
+    if (debouncedPriceRange[0] > 0 || debouncedPriceRange[1] < 1000) {
+      items = items.filter(product => {
+        const effectivePrice = product.sale_price && product.sale_price > 0 
+          ? product.sale_price 
+          : product.base_price
+        return effectivePrice >= debouncedPriceRange[0] && effectivePrice <= debouncedPriceRange[1]
+      })
+    }
+    
+    // Filter by on sale (matching ProductCard logic exactly)
+    if (showOnSale) {
+      items = items.filter(product => {
+        const activeVariants = product.has_variants && product.variants && product.variants.length > 0
+          ? product.variants.filter(v => v.is_active)
+          : []
+        
+        const hasVariants = activeVariants.length > 0
+        
+        if (hasVariants) {
+          return activeVariants.some(v => {
+            const basePrice = v.price ?? 0
+            const salePrice = v.sale_price ?? 0
+            return salePrice > 0 && basePrice > 0 && salePrice < basePrice
+          })
+        } else {
+          return product.sale_price != null && product.sale_price > 0 && product.sale_price < product.base_price
+        }
+      })
+    }
+    
+    // Filter by in stock
+    if (showInStock) {
+      items = items.filter(product => {
+        if (product.has_variants && product.variants) {
+          return product.variants.some(v => v.is_active && v.stock > 0)
+        }
+        return product.stock > 0
+      })
+    }
+    
+    return items
+  }, [productsData?.items, debouncedPriceRange, showOnSale, showInStock])
+
+  const products = filteredProducts
   const totalPages = productsData?.total_pages ?? 1
-  const totalProducts = productsData?.total ?? 0
+
+  const clearAllFilters = () => {
+    setSliderValue([0, 1000])
+    setDebouncedPriceRange([0, 1000])
+    setShowOnSale(false)
+    setShowInStock(false)
+    setPage(1)
+  }
+
+  const hasActiveFilters = showOnSale || showInStock || sliderValue[0] > 0 || sliderValue[1] < 1000
+
+  // Memoized slider change handler for smooth sliding
+  const handleSliderChange = useCallback((value: number[]) => {
+    setSliderValue(value as [number, number])
+  }, [])
+
+  // Collapsible state for subcategories
+  const [subcategoriesOpen, setSubcategoriesOpen] = useState(true)
+
+  // Filter sidebar content as JSX (not a component to avoid re-mounting)
+  const filterContent = (
+    <div className="space-y-6">
+      {/* Clear Filters */}
+      {hasActiveFilters && (
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          onClick={clearAllFilters}
+          className="w-full justify-start text-muted-foreground hover:text-foreground"
+        >
+          <IconX className="w-4 h-4 mr-2" />
+          Clear all filters
+        </Button>
+      )}
+
+      {/* Subcategories */}
+      {currentCategory?.children && currentCategory.children.length > 0 && (
+        <>
+          <Collapsible open={subcategoriesOpen} onOpenChange={setSubcategoriesOpen}>
+            <CollapsibleTrigger className="flex items-center justify-between w-full py-2 font-semibold text-sm">
+              Subcategories
+              {subcategoriesOpen ? (
+                <IconChevronUp className="w-4 h-4" />
+              ) : (
+                <IconChevronDown className="w-4 h-4" />
+              )}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2 space-y-1">
+              {currentCategory.children.map((child) => (
+                <Link
+                  key={child.id}
+                  href={`/shop/${child.slug}`}
+                  className="block py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {child.name}
+                </Link>
+              ))}
+            </CollapsibleContent>
+          </Collapsible>
+          <Separator />
+        </>
+      )}
+
+      {/* Price Range */}
+      <Collapsible open={priceOpen} onOpenChange={setPriceOpen}>
+        <CollapsibleTrigger className="flex items-center justify-between w-full py-2 font-semibold text-sm">
+          Price Range
+          {priceOpen ? (
+            <IconChevronUp className="w-4 h-4" />
+          ) : (
+            <IconChevronDown className="w-4 h-4" />
+          )}
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-4 space-y-4">
+          <Slider
+            value={sliderValue}
+            onValueChange={handleSliderChange}
+            min={0}
+            max={1000}
+            step={1}
+            minStepsBetweenThumbs={1}
+            className="w-full"
+          />
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>${sliderValue[0]}</span>
+            <span>${sliderValue[1] === 1000 ? "1000+" : sliderValue[1]}</span>
+          </div>
+          <div className="space-y-2">
+            {PRICE_RANGES.map((range) => (
+              <div key={range.label} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`price-${range.label}`}
+                  checked={sliderValue[0] === range.min && sliderValue[1] === range.max}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setSliderValue([range.min, range.max])
+                    } else {
+                      setSliderValue([0, 1000])
+                    }
+                  }}
+                />
+                <Label 
+                  htmlFor={`price-${range.label}`}
+                  className="text-sm font-normal cursor-pointer"
+                >
+                  {range.label}
+                </Label>
+              </div>
+            ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      <Separator />
+
+      {/* Availability */}
+      <Collapsible open={availabilityOpen} onOpenChange={setAvailabilityOpen}>
+        <CollapsibleTrigger className="flex items-center justify-between w-full py-2 font-semibold text-sm">
+          Availability
+          {availabilityOpen ? (
+            <IconChevronUp className="w-4 h-4" />
+          ) : (
+            <IconChevronDown className="w-4 h-4" />
+          )}
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-2 space-y-2">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="in-stock"
+              checked={showInStock}
+              onCheckedChange={(checked) => setShowInStock(checked as boolean)}
+            />
+            <Label htmlFor="in-stock" className="text-sm font-normal cursor-pointer">
+              In Stock Only
+            </Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="on-sale"
+              checked={showOnSale}
+              onCheckedChange={(checked) => setShowOnSale(checked as boolean)}
+            />
+            <Label htmlFor="on-sale" className="text-sm font-normal cursor-pointer">
+              On Sale
+            </Label>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  )
 
   return (
     <>
@@ -106,100 +362,168 @@ export default function ShopCategoryPage() {
               {currentCategory.description}
             </p>
           )}
-          
-          {/* Child Categories */}
-          {currentCategory?.children && currentCategory.children.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-2 mt-6">
-              {currentCategory.children.map((child) => (
-                <Link
-                  key={child.id}
-                  href={`/shop/${child.slug}`}
-                  className="inline-flex items-center px-4 py-2 rounded-full bg-white/20 hover:bg-white/30 text-white text-sm font-medium backdrop-blur-sm transition-all"
-                >
-                  {child.name}
-                </Link>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
       <MaxWidthLayout className="py-8">
-        {/* Toolbar */}
-      <div className="flex items-center justify-between mb-6 pb-4 border-b">
-        <p className="text-sm text-muted-foreground">
-          {totalProducts} {totalProducts === 1 ? "product" : "products"} found
-        </p>
-        <div className="flex items-center gap-4">
-          <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
-            <SelectContent>
-              {SORT_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Products Grid */}
-      {productsLoading ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <ProductCardSkeleton key={i} />
-          ))}
-        </div>
-      ) : products.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="mx-auto w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-            <IconShoppingCart className="w-8 h-8 text-muted-foreground" />
-          </div>
-          <h2 className="text-xl font-semibold mb-2">No products found</h2>
-          <p className="text-muted-foreground mb-4">
-            There are no products in this category yet.
-          </p>
-          <Link href="/shop">
-            <Button>Browse All Products</Button>
-          </Link>
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-8">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-              >
-                Previous
-              </Button>
-              <span className="text-sm text-muted-foreground px-4">
-                Page {page} of {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-              >
-                Next
-              </Button>
+        <div className="flex gap-8">
+          {/* Desktop Sidebar */}
+          <aside className="hidden lg:block w-64 flex-shrink-0">
+            <div className="sticky top-24">
+              <h2 className="font-semibold mb-4">Filters</h2>
+              {filterContent}
             </div>
-          )}
-        </>
-      )}
+          </aside>
+
+          {/* Main Content */}
+          <div className="flex-1 min-w-0">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between mb-6 pb-4 border-b gap-4">
+              <div className="flex items-center gap-4">
+                {/* Mobile Filter Button */}
+                <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
+                  <SheetTrigger asChild>
+                    <Button variant="outline" size="sm" className="lg:hidden">
+                      <IconFilter className="w-4 h-4 mr-2" />
+                      Filters
+                      {hasActiveFilters && (
+                        <span className="ml-2 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
+                          {(showOnSale ? 1 : 0) + (showInStock ? 1 : 0) + (sliderValue[0] > 0 || sliderValue[1] < 1000 ? 1 : 0)}
+                        </span>
+                      )}
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent side="left" className="w-80 overflow-y-auto px-6">
+                    <SheetHeader>
+                      <SheetTitle>Filters</SheetTitle>
+                    </SheetHeader>
+                    <div className="mt-6 pr-2">
+                      {filterContent}
+                    </div>
+                  </SheetContent>
+                </Sheet>
+              </div>
+
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Active Filters */}
+            {hasActiveFilters && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {showOnSale && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowOnSale(false)}
+                    className="h-7 text-xs"
+                  >
+                    On Sale
+                    <IconX className="w-3 h-3 ml-1" />
+                  </Button>
+                )}
+                {showInStock && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowInStock(false)}
+                    className="h-7 text-xs"
+                  >
+                    In Stock
+                    <IconX className="w-3 h-3 ml-1" />
+                  </Button>
+                )}
+                {(sliderValue[0] > 0 || sliderValue[1] < 1000) && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setSliderValue([0, 1000])
+                      setDebouncedPriceRange([0, 1000])
+                    }}
+                    className="h-7 text-xs"
+                  >
+                    ${sliderValue[0]} - ${sliderValue[1] === 1000 ? "1000+" : sliderValue[1]}
+                    <IconX className="w-3 h-3 ml-1" />
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Products Grid */}
+            {productsLoading ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <ProductCardSkeleton key={i} />
+                ))}
+              </div>
+            ) : products.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="mx-auto w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
+                  <IconShoppingCart className="w-8 h-8 text-muted-foreground" />
+                </div>
+                <h2 className="text-xl font-semibold mb-2">No products found</h2>
+                <p className="text-muted-foreground mb-4">
+                  {hasActiveFilters 
+                    ? "Try adjusting your filters." 
+                    : "There are no products in this category yet."}
+                </p>
+                {hasActiveFilters ? (
+                  <Button variant="outline" onClick={clearAllFilters}>
+                    Clear Filters
+                  </Button>
+                ) : (
+                  <Link href="/shop">
+                    <Button>Browse All Products</Button>
+                  </Link>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                  {products.map((product) => (
+                    <ProductCard key={product.id} product={product} />
+                  ))}
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-center gap-2 mt-8">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={page === 1}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-sm text-muted-foreground px-4">
+                      Page {page} of {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={page === totalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </MaxWidthLayout>
     </>
   )

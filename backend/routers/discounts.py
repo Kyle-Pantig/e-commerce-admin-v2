@@ -552,6 +552,7 @@ async def validate_discount_code(
         return DiscountValidationResponse(
             valid=True,
             code=discount.code,
+            discount_id=discount.id,
             discount_type=discount_type,
             discount_value=discount.discountValue,
             discount_amount=round(discount_amount, 2),

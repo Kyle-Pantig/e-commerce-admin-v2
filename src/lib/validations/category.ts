@@ -26,11 +26,9 @@ export const categorySchema = z.object({
   display_order: z
     .number()
     .int("Display order must be a whole number")
-    .min(0, "Display order cannot be negative")
-    .default(0),
+    .min(0, "Display order cannot be negative"),
   is_active: z
-    .boolean()
-    .default(true),
+    .boolean(),
 })
 
 export type CategoryFormData = z.infer<typeof categorySchema>

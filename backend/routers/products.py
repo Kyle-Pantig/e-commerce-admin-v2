@@ -209,6 +209,7 @@ async def list_public_products(
     per_page: int = Query(20, ge=1, le=100),
     category_slug: Optional[str] = None,
     is_featured: Optional[bool] = None,
+    is_new: Optional[bool] = None,
     search: Optional[str] = None,
     sort_by: str = "created_at",
     sort_order: str = "desc",
@@ -247,6 +248,9 @@ async def list_public_products(
         
         if is_featured is not None:
             where["isFeatured"] = is_featured
+        
+        if is_new is not None:
+            where["isNew"] = is_new
         
         if search:
             where["OR"] = [

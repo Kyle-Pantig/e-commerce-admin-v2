@@ -75,7 +75,7 @@ export const taxApi = {
    * List tax rules with pagination and filters
    */
   list: async (params: TaxRuleListParams = {}): Promise<TaxRuleListResponse> => {
-    const queryString = buildQueryString(params)
+    const queryString = buildQueryString(params as Record<string, unknown>)
     return apiClient.get<TaxRuleListResponse>(`/tax${queryString}`)
   },
 

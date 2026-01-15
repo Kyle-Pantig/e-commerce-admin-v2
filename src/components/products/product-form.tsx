@@ -140,6 +140,7 @@ interface LocalVariant {
   low_stock_threshold?: number
   is_active: boolean
   options: Record<string, string>
+  image_url?: string
   isExisting?: boolean
 }
 
@@ -350,6 +351,7 @@ export function ProductForm({
         low_stock_threshold: v.low_stock_threshold || undefined,
         is_active: v.is_active,
         options: (v.options as Record<string, string>) || {},
+        image_url: v.image_url || undefined,
         isExisting: true
       }))
     }
@@ -722,7 +724,8 @@ export function ProductForm({
       stock: v.stock,
       low_stock_threshold: v.low_stock_threshold ?? null,
       is_active: v.is_active,
-      options: (v.options as Record<string, string>) || {}
+      options: (v.options as Record<string, string>) || {},
+      image_url: v.image_url ?? null,
     }))
 
     const currentVariants = variants.map(v => ({
@@ -735,7 +738,8 @@ export function ProductForm({
       stock: v.stock,
       low_stock_threshold: v.low_stock_threshold ?? null,
       is_active: v.is_active,
-      options: v.options || {}
+      options: v.options || {},
+      image_url: v.image_url ?? null,
     }))
     
     if (currentVariants.length !== originalVariants.length) return true
@@ -772,7 +776,8 @@ export function ProductForm({
         stock: variant.stock,
         low_stock_threshold: variant.low_stock_threshold,
         is_active: variant.is_active,
-        options: sortedOptions
+        options: sortedOptions,
+        image_url: variant.image_url,
       })
     }
     
@@ -833,10 +838,12 @@ export function ProductForm({
         sku: v.sku,
         price: v.price,
         sale_price: v.sale_price,
+        cost_price: v.cost_price,
         stock: v.stock,
         low_stock_threshold: v.low_stock_threshold,
         is_active: v.is_active,
-        options: v.options
+        options: v.options,
+        image_url: v.image_url,
       }))
     }
     onSubmit(finalData)
@@ -2363,7 +2370,7 @@ export function ProductForm({
                 <span className="text-xs text-muted-foreground mt-0.5 whitespace-nowrap">Review your modifications before applying.</span>
               </div>
               <div className="flex items-center gap-3">
-                <Button type="button" variant="outline" onClick={() => { form.reset(); setLocalImages(product?.images?.map(img => ({ id: img.id, url: img.url, alt_text: img.alt_text || undefined, display_order: img.display_order, is_primary: img.is_primary })) || []); setVariants(product?.variants?.map(v => ({ id: v.id, name: v.name, sku: v.sku || "", price: v.price || 0, sale_price: v.sale_price || undefined, cost_price: v.cost_price || undefined, stock: v.stock, low_stock_threshold: v.low_stock_threshold || undefined, is_active: v.is_active, options: (v.options as Record<string, string>) || {}, isExisting: true })) || []); toast.info("Changes discarded"); }} className="h-10 px-6 font-semibold border-2">Discard</Button>
+                <Button type="button" variant="outline" onClick={() => { form.reset(); setLocalImages(product?.images?.map(img => ({ id: img.id, url: img.url, alt_text: img.alt_text || undefined, display_order: img.display_order, is_primary: img.is_primary })) || []); setVariants(product?.variants?.map(v => ({ id: v.id, name: v.name, sku: v.sku || "", price: v.price || 0, sale_price: v.sale_price || undefined, cost_price: v.cost_price || undefined, stock: v.stock, low_stock_threshold: v.low_stock_threshold || undefined, is_active: v.is_active, options: (v.options as Record<string, string>) || {}, image_url: v.image_url || undefined, isExisting: true })) || []); toast.info("Changes discarded"); }} className="h-10 px-6 font-semibold border-2">Discard</Button>
                 <Button type="submit" className="h-10 px-8 font-bold shadow-lg shadow-primary/20" disabled={isLoading || !hasChanges}>{isLoading ? <><IconLoader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : <><IconCheck className="h-4 w-4 mr-2" />{isEditing ? "Update Product" : "Publish Product"}</>}</Button>
               </div>
             </div>

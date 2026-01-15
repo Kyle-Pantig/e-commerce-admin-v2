@@ -131,6 +131,18 @@ export type {
   SiteContentListResponse,
 } from "./services/site-content"
 
+export { wishlistApi } from "./services/wishlist"
+
+export { cartApi } from "./services/cart"
+
+export { addressesApi } from "./services/addresses"
+export type {
+  AddressType,
+  UserAddress,
+  UserAddressCreate,
+  UserAddressUpdate,
+} from "./services/addresses"
+
 // =============================================================================
 // Types - Re-export all types for convenience
 // =============================================================================
@@ -192,4 +204,22 @@ export type {
   OrderStatusUpdate,
   OrderListParams,
   OrderStats,
+
+  // Wishlist
+  WishlistItemProduct,
+  WishlistItem,
+  Wishlist,
+  WishlistProductIds,
+  WishlistToggleResponse,
+
+  // Cart
+  CartItemVariant,
+  CartItemProduct,
+  CartItem,
+  Cart,
+  AddToCartRequest,
+  CartCountResponse,
+  SyncCartRequest,
+  SyncCartResponse,
+  LocalCartItem,
 } from "./types"

@@ -129,9 +129,16 @@ async function request<T>(
   const fetchOptions: RequestInit = {
     method,
     headers,
-    ...(body && { body: JSON.stringify(body) }),
-    ...(config?.cache && { cache: config.cache }),
-    ...(config?.next && { next: config.next }),
+  }
+  
+  if (body) {
+    fetchOptions.body = JSON.stringify(body)
+  }
+  if (config?.cache) {
+    fetchOptions.cache = config.cache
+  }
+  if (config?.next) {
+    fetchOptions.next = config.next
   }
 
   const response = await fetch(url, fetchOptions)

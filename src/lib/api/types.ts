@@ -434,11 +434,7 @@ export type PaymentStatus =
 
 export type PaymentMethod = 
   | "CASH_ON_DELIVERY"
-  | "CREDIT_CARD"
-  | "DEBIT_CARD"
-  | "BANK_TRANSFER"
-  | "DIGITAL_WALLET"
-  | "OTHER"
+  | "STRIPE"
 
 export interface OrderItem {
   id: string
@@ -637,5 +633,154 @@ export interface OrderStats {
     pending: number
     paid: number
   }
+}
+
+// =============================================================================
+// Wishlist Types
+// =============================================================================
+
+export interface WishlistItemVariant {
+  id: string
+  name: string
+  sku: string | null
+  price: number | null
+  sale_price: number | null
+  stock: number
+  is_active: boolean
+  options: Record<string, string> | null
+}
+
+export interface WishlistItemImage {
+  id: string
+  url: string
+  alt_text: string | null
+  display_order: number
+  is_primary: boolean
+}
+
+export interface WishlistItemProduct {
+  id: string
+  name: string
+  slug: string
+  base_price: number
+  sale_price: number | null
+  primary_image: string | null
+  images: WishlistItemImage[] | null
+  is_new: boolean
+  has_variants: boolean
+  stock: number
+  status: string
+  variants: WishlistItemVariant[] | null
+}
+
+export interface WishlistItem {
+  id: string
+  product_id: string
+  product: WishlistItemProduct
+  created_at: string
+}
+
+export interface Wishlist {
+  id: string
+  user_id: string
+  items: WishlistItem[]
+  total_items: number
+  created_at: string
+  updated_at: string
+}
+
+export interface WishlistProductIds {
+  product_ids: string[]
+}
+
+export interface WishlistToggleResponse {
+  message: string
+  is_in_wishlist: boolean
+  item: WishlistItem | null
+}
+
+// =============================================================================
+// Cart Types
+// =============================================================================
+
+export interface CartItemVariant {
+  id: string
+  name: string
+  sku: string | null
+  price: number | null
+  sale_price: number | null
+  stock: number
+  is_active: boolean
+  options: Record<string, string> | null
+  image_url: string | null
+}
+
+export interface CartItemProduct {
+  id: string
+  name: string
+  slug: string
+  base_price: number
+  sale_price: number | null
+  primary_image: string | null
+  has_variants: boolean
+  stock: number
+  status: string
+}
+
+export interface CartItem {
+  id: string
+  product_id: string
+  variant_id: string | null
+  quantity: number
+  options: Record<string, unknown> | null
+  price_at_add: number
+  product: CartItemProduct
+  variant: CartItemVariant | null
+  current_price: number
+  subtotal: number
+  price_changed: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface Cart {
+  id: string
+  user_id: string
+  items: CartItem[]
+  total_items: number
+  subtotal: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AddToCartRequest {
+  product_id: string
+  variant_id?: string | null
+  quantity?: number
+  options?: Record<string, unknown> | null
+}
+
+export interface CartCountResponse {
+  count: number
+  total_quantity: number
+}
+
+export interface SyncCartRequest {
+  items: AddToCartRequest[]
+}
+
+export interface SyncCartResponse {
+  message: string
+  synced_count: number
+  cart: Cart
+}
+
+// Local storage cart item (for guest users)
+export interface LocalCartItem {
+  product_id: string
+  variant_id: string | null
+  quantity: number
+  options: Record<string, unknown> | null
+  added_at: string
 }
 

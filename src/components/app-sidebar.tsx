@@ -234,7 +234,7 @@ export function AppSidebar({
   const userData = {
     name: user?.name || "",
     email: user?.email || "",
-    avatar: user?.avatar || undefined,
+    avatar: user?.avatar || "",
   }
 
   // Filter nav items based on user permissions
